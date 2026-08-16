@@ -24,11 +24,19 @@ export interface FragmentSelection {
   total_duration: number;
 }
 
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+  probability?: number;
+}
+
 export interface SubtitleLine {
   id: number;
   start: number;
   end: number;
   text: string;
+  words?: WordTiming[] | null;
 }
 
 export interface SubtitleStyle {
@@ -52,4 +60,47 @@ export interface ThumbnailResult {
   timestamp: number;
   path: string;
   error?: string;
+}
+
+// ─── New: BPM & Beat Sync ───
+
+export interface BPMResult {
+  bpm: number;
+  bpm_raw?: number;
+  bpm_half?: number;
+  bpm_double?: number;
+  beats: number[];
+  downbeats: number[];
+  duration: number;
+}
+
+export interface BeatSyncResult {
+  bpm: number;
+  beats: number[];
+  fragments: Fragment[];
+  total_duration: number;
+}
+
+// ─── New: Speech Recognition ───
+
+export interface TranscribeResult {
+  text: string;
+  lines: { text: string; start: number; end: number; words: WordTiming[] }[];
+  words: WordTiming[];
+  language: string;
+}
+
+// ─── New: Audio Info ───
+
+export interface AudioInfo {
+  duration: number;
+  bpm: number;
+  bpm_raw?: number;
+  bpm_half?: number;
+  bpm_double?: number;
+  beats: number[];
+  suggested_start: number;
+  suggested_end: number;
+  rms_times: number[];
+  rms_values: number[];
 }

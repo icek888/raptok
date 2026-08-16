@@ -7,11 +7,14 @@ interface Props {
   videoInfo: VideoInfo | null;
   fragments: Fragment[];
   audioPath: string | null;
+  audioStart: number;
   subtitles: SubtitleLine[];
   style: SubtitleStyle;
+  karaoke: boolean;
+  displayMode: string;
 }
 
-export function RenderPanel({ videoInfo, fragments, audioPath, subtitles, style }: Props) {
+export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, style, karaoke, displayMode }: Props) {
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +28,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, subtitles, style 
     setError(null);
     setResult(null);
     try {
-      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style);
+      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Render failed');
@@ -39,6 +42,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, subtitles, style 
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-400">
           Ready to render: {fragments.length} fragments · {totalDuration.toFixed(1)}s · {subtitles.length} subtitles
+          {karaoke && <span className="ml-2 text-purple-400">· karaoke mode</span>}
         </div>
       </div>
 
@@ -48,6 +52,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, subtitles, style 
         <ChecklistItem checked={fragments.length >= 3} label={`${fragments.length} fragments selected (min 3)`} />
         <ChecklistItem checked={!!audioPath} label="Audio track uploaded" />
         <ChecklistItem checked={subtitles.length > 0} label="Subtitles generated" />
+        <ChecklistItem checked={karaoke} label={`Karaoke mode · ${displayMode === 'word_by_word' ? 'word-by-word' : 'line + highlight'}`} />
       </div>
 
       <button

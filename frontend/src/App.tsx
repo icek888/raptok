@@ -1,21 +1,19 @@
 import { useState } from 'react';
-import { Film, Scissors, Type, Palette, Wand2, Music } from 'lucide-react';
+import { Film, Scissors, Type, Wand2, Music } from 'lucide-react';
 import { InputPanel } from './components/InputPanel';
 import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
-import { StyleEditor } from './components/StyleEditor';
 import { RenderPanel } from './components/RenderPanel';
 import { defaultStyle } from './api/client';
-import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle } from './types';
+import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult } from './types';
 
-type Step = 0 | 1 | 2 | 3 | 4;
+type Step = 0 | 1 | 2 | 3;
 
 const STEPS = [
   { id: 0 as Step, label: 'Input', icon: Film },
   { id: 1 as Step, label: 'Fragments', icon: Scissors },
   { id: 2 as Step, label: 'Subtitles', icon: Type },
-  { id: 3 as Step, label: 'Style', icon: Palette },
-  { id: 4 as Step, label: 'Render', icon: Wand2 },
+  { id: 3 as Step, label: 'Render', icon: Wand2 },
 ];
 
 function App() {
@@ -27,6 +25,12 @@ function App() {
   const [fragments, setFragments] = useState<Fragment[]>([]);
   const [subtitles, setSubtitles] = useState<SubtitleLine[]>([]);
   const [style, setStyle] = useState<SubtitleStyle>(defaultStyle);
+  const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
+  const [bpmData, setBpmData] = useState<BPMResult | null>(null);
+  const [karaoke, setKaraoke] = useState(true);
+  const [displayMode, setDisplayMode] = useState<'auto' | 'line_highlight' | 'word_by_word' | 'single_word'>('auto');
+  const [beatDivision, setBeatDivision] = useState('1/4');
+  const [audioStart, setAudioStart] = useState(0);
 
   const canProceed = (s: Step): boolean => {
     switch (s) {
@@ -45,7 +49,6 @@ function App() {
 
   const handleFragmentsChange = (frags: Fragment[]) => {
     setFragments(frags);
-    // Reset subtitles when fragments change
     if (subtitles.length > 0) setSubtitles([]);
   };
 
@@ -63,6 +66,13 @@ function App() {
               <p className="text-xs text-gray-500">TikTok Content Maker for Rappers</p>
             </div>
           </div>
+
+          {bpmData && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+              <span className="text-sm text-purple-400 font-mono">♩ {bpmData.bpm}</span>
+              <span className="text-xs text-gray-500">BPM</span>
+            </div>
+          )}
 
           <a href="https://github.com/icek888/raptok" target="_blank" rel="noopener" className="text-sm text-gray-500 hover:text-gray-300 transition">
             GitHub
@@ -120,6 +130,11 @@ function App() {
               videoInfo={videoInfo}
               fragments={fragments}
               onFragmentsChange={handleFragmentsChange}
+              audioPath={audioPath}
+              beatDivision={beatDivision}
+              onBeatDivisionChange={setBeatDivision}
+              onBpmDetected={setBpmData}
+              bpmData={bpmData}
             />
           )}
 
@@ -129,26 +144,36 @@ function App() {
               fragments={fragments}
               subtitles={subtitles}
               onSubtitlesChange={setSubtitles}
+              audioPath={audioPath}
+              wordTimings={wordTimings}
+              onWordTimingsChange={setWordTimings}
+              karaoke={karaoke}
+              onKaraokeChange={setKaraoke}
+              displayMode={displayMode}
+              onDisplayModeChange={setDisplayMode}
+              videoUrl={videoInfo?.local_path || null}
+              onAudioStartChange={setAudioStart}
+              style={style}
+              onStyleChange={setStyle}
             />
           )}
 
           {step === 3 && (
-            <StyleEditor style={style} onChange={setStyle} />
-          )}
-
-          {step === 4 && (
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
               audioPath={audioPath}
+              audioStart={audioStart}
               subtitles={subtitles}
               style={style}
+              karaoke={karaoke}
+              displayMode={displayMode}
             />
           )}
         </div>
 
         {/* Navigation */}
-        {step < 4 && (
+        {step < 3 && (
           <div className="flex justify-between mt-4">
             <button
               onClick={() => setStep(Math.max(0, step - 1) as Step)}
@@ -158,7 +183,7 @@ function App() {
               ← Back
             </button>
             <button
-              onClick={() => canProceed(step) && setStep(Math.min(4, step + 1) as Step)}
+              onClick={() => canProceed(step) && setStep(Math.min(3, step + 1) as Step)}
               disabled={!canProceed(step)}
               className="px-6 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-30"
             >

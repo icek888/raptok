@@ -1,17 +1,35 @@
 import { useState, useEffect } from 'react';
-import { Shuffle, RefreshCw, Plus, Trash2, Clock, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { Shuffle, RefreshCw, Plus, Trash2, Clock, Image as ImageIcon, Loader2, Music2, Zap } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, VideoInfo } from '../types';
+import type { Fragment, VideoInfo, BPMResult } from '../types';
 
 interface Props {
   videoInfo: VideoInfo;
   fragments: Fragment[];
   onFragmentsChange: (fragments: Fragment[]) => void;
+  audioPath: string | null;
+  beatDivision: string;
+  onBeatDivisionChange: (div: string) => void;
+  onBpmDetected: (bpm: BPMResult) => void;
+  bpmData: BPMResult | null;
 }
 
-export function FragmentEditor({ videoInfo, fragments, onFragmentsChange }: Props) {
+const BEAT_DIVISIONS = [
+  { value: '1/1', label: '1/1 — Bar' },
+  { value: '1/2', label: '1/2 — Half' },
+  { value: '1/4', label: '1/4 — Beat' },
+  { value: '1/8', label: '1/8 — 8th' },
+  { value: '1/16', label: '1/16 — 16th' },
+];
+
+export function FragmentEditor({
+  videoInfo, fragments, onFragmentsChange,
+  audioPath, beatDivision, onBeatDivisionChange,
+  onBpmDetected, bpmData,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [rerolling, setRerolling] = useState(false);
+  const [beatSyncing, setBeatSyncing] = useState(false);
   const [thumbnails, setThumbnails] = useState<Record<number, string>>({});
   const [totalDuration, setTotalDuration] = useState(0);
 
@@ -29,6 +47,21 @@ export function FragmentEditor({ videoInfo, fragments, onFragmentsChange }: Prop
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBeatSync = async () => {
+    if (!audioPath) return;
+    setBeatSyncing(true);
+    try {
+      const result = await api.beatSync(audioPath, videoInfo.duration, 7, beatDivision, 2, 5);
+      onBpmDetected({ bpm: result.bpm, beats: result.beats, downbeats: [], duration: result.total_duration });
+      onFragmentsChange(result.fragments);
+      await fetchThumbnails(result.fragments);
+    } catch (e) {
+      console.error('Beat sync failed:', e);
+    } finally {
+      setBeatSyncing(false);
     }
   };
 
@@ -58,13 +91,11 @@ export function FragmentEditor({ videoInfo, fragments, onFragmentsChange }: Prop
   const handleReplace = async (fragId: number) => {
     const frag = fragments.find(f => f.id === fragId);
     if (!frag) return;
-    // Replace with a random new start within video duration
     const maxStart = Math.max(0, videoInfo.duration - frag.duration - 5);
     const newStart = Math.random() * maxStart;
     try {
       const result = await api.replaceFragment(videoInfo.duration, fragments, fragId, newStart, frag.duration);
       onFragmentsChange(result.fragments);
-      // Update thumbnail for replaced fragment
       const newFrags = result.fragments;
       const replaced = newFrags.find(f => f.id === fragId);
       if (replaced) {
@@ -103,6 +134,72 @@ export function FragmentEditor({ videoInfo, fragments, onFragmentsChange }: Prop
 
   return (
     <div className="space-y-4">
+      {/* Beat Sync Panel */}
+      {audioPath && (
+        <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Music2 size={16} className="text-purple-400" />
+            <span className="text-sm font-medium text-purple-300">Beat-Synced Cuts</span>
+            {bpmData && (
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-purple-400 font-mono bg-purple-500/10 px-2 py-1 rounded">
+                  ♩ {bpmData.bpm} BPM
+                </span>
+                {bpmData.bpm_raw != null && bpmData.bpm_raw !== bpmData.bpm && (
+                  <span className="text-xs text-gray-500 font-mono">
+                    raw: {bpmData.bpm_raw}
+                  </span>
+                )}
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => {
+                      const newBpm = bpmData.bpm * 2;
+                      onBpmDetected({ ...bpmData, bpm: newBpm });
+                    }}
+                    className="px-2 py-0.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 rounded text-purple-300 transition"
+                    title="Double BPM"
+                  >
+                    ×2
+                  </button>
+                  <button
+                    onClick={() => {
+                      const newBpm = bpmData.bpm / 2;
+                      onBpmDetected({ ...bpmData, bpm: newBpm });
+                    }}
+                    className="px-2 py-0.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 rounded text-purple-300 transition"
+                    title="Half BPM"
+                  >
+                    ÷2
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <select
+              value={beatDivision}
+              onChange={(e) => onBeatDivisionChange(e.target.value)}
+              className="bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg px-3 py-2 text-sm text-gray-200 focus:border-purple-500 outline-none"
+            >
+              {BEAT_DIVISIONS.map(d => (
+                <option key={d.value} value={d.value}>{d.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleBeatSync}
+              disabled={beatSyncing}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium flex items-center gap-2 transition disabled:opacity-40"
+            >
+              {beatSyncing ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              Sync to Beat
+            </button>
+            <span className="text-xs text-gray-500">
+              Cuts aligned to musical beats
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-400">

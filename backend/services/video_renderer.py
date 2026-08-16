@@ -21,6 +21,8 @@ def render_clip(
     style: SubtitleStyle = SubtitleStyle(),
     job_id: str | None = None,
     progress_callback=None,
+    karaoke: bool = False,
+    display_mode: str = "line_highlight",
 ) -> str:
     """
     Render a TikTok-format clip (1080x1920) from fragments with subtitles and custom audio.
@@ -41,7 +43,7 @@ def render_clip(
     work_dir.mkdir(exist_ok=True)
     
     # Step 1: Generate ASS subtitle file
-    ass_path = generate_ass(subtitles, style, job_id)
+    ass_path = generate_ass(subtitles, style, job_id, karaoke=karaoke, display_mode=display_mode)
     
     # Step 2: Extract each fragment
     frag_paths = []

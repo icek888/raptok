@@ -1,0 +1,42 @@
+services:
+  raptok-frontend:
+    image: nginx:stable
+    restart: always
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
+      - ./nginx-internal.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.raptok.rule=Host(`jimmy.hotloads.llc`)"
+      - "traefik.http.routers.raptok.entrypoints=websecure"
+      - "traefik.http.routers.raptok.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.raptok.loadbalancer.server.port=80"
+      # WebSocket support
+      - "traefik.http.routers.raptok.middlewares=ratelimit"
+      - "traefik.http.middlewares.ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.ratelimit.ratelimit.burst=50"
+
+  raptok-backend:
+    build: ./backend
+    restart: always
+    volumes:
+      - ./backend:/app
+      - ./output:/output
+      - ./tmp:/tmp/raptok
+    environment:
+      - RAPTOK_TEMP_DIR=/tmp/raptok
+      - RAPTOK_OUTPUT_DIR=/output
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.raptok-api.rule=Host(`jimmy.hotloads.llc`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.raptok-api.entrypoints=websecure"
+      - "traefik.http.routers.raptok-api.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.raptok-api.loadbalancer.server.port=8000"
+
+networks:
+  traefik:
+    external: true

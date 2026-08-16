@@ -10,13 +10,18 @@ from config import TEMP_DIR, OUTPUT_DIR
 from models.schemas import (
     AnalyzeRequest, VideoInfo, FragmentSelectRequest, Fragment,
     FragmentReplaceRequest, SubtitleRequest, SubtitleLine,
-    RenderRequest, RenderStatus, SubtitleStyle
+    RenderRequest, RenderStatus, SubtitleStyle,
+    BPMRequest, BPMResult, BeatSyncRequest, BeatSyncResult,
+    TranscribeRequest, TranscribeResult,
+    WordTiming, WordSubtitleRequest, SubtitleAdjustRequest,
 )
 from services.downloader import download_video
 from services.fragment_selector import select_fragments, replace_fragment, get_total_duration
 from services.thumbnail_generator import get_thumbnail
-from services.subtitle_generator import split_lyrics, generate_ass
+from services.subtitle_generator import split_lyrics, split_lyrics_word_level, generate_ass
 from services.video_renderer import render_clip
+from services.bpm_detector import detect_bpm, get_beat_aligned_starts
+from services.speech_recognizer import transcribe_to_lyrics
 
 app = FastAPI(title="RapTok API", version="0.1.0")
 
@@ -33,6 +38,7 @@ _jobs: dict = {}
 
 
 @app.get("/health")
+@app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "raptok", "version": "0.1.0"}
 
@@ -110,13 +116,40 @@ async def api_render(req: RenderRequest):
         fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
         subtitles = [SubtitleLine(**s) if isinstance(s, dict) else s for s in req.subtitles]
         
+        # If audio_start is set, extract the fragment from audio first
+        audio_path = req.audio_path
+        if req.audio_start > 0:
+            # Calculate total video duration
+            total_dur = sum(f.duration for f in fragments)
+            # Extract audio fragment
+            import tempfile
+            import subprocess
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_audio = tmp.name
+            subprocess.run([
+                "ffmpeg", "-y", "-i", req.audio_path,
+                "-ss", str(req.audio_start), "-t", str(total_dur + 1),
+                "-ar", "44100", "-ac", "2", tmp_audio
+            ], capture_output=True, timeout=120)
+            audio_path = tmp_audio
+        
         output_path = render_clip(
             video_path=req.video_path,
             fragments=fragments,
-            audio_path=req.audio_path,
+            audio_path=audio_path,
             subtitles=subtitles,
             style=req.style,
+            karaoke=req.karaoke,
+            display_mode=req.display_mode,
         )
+        
+        # Cleanup temp audio
+        if req.audio_start > 0:
+            try:
+                if os.path.exists(tmp_audio):
+                    os.unlink(tmp_audio)
+            except Exception:
+                pass
         
         return {
             "status": "completed",
@@ -158,6 +191,323 @@ async def get_thumbnail_file(filename: str):
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     return FileResponse(str(filepath), media_type="image/jpeg")
+
+
+# ─── Audio preview endpoint ───
+
+@app.get("/api/audio-preview/{filename}")
+async def audio_preview(filename: str):
+    """Serve audio file for preview playback."""
+    # Search in temp dir
+    for f in TEMP_DIR.iterdir():
+        if filename in f.name:
+            return FileResponse(str(f), media_type="audio/mpeg")
+    raise HTTPException(status_code=404, detail="Audio file not found")
+
+
+# ─── BPM Detection ───
+
+@app.post("/api/bpm", response_model=BPMResult)
+async def api_detect_bpm(req: BPMRequest):
+    """Detect BPM and extract beat positions from audio."""
+    try:
+        result = detect_bpm(req.audio_path)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Audio Info (duration, waveform preview) ───
+
+@app.post("/api/audio-info")
+async def api_audio_info(req: BPMRequest):
+    """Get audio file info: duration, BPM, suggested fragment range."""
+    try:
+        import librosa
+        y, sr = librosa.load(req.audio_path, sr=22050, mono=True)
+        duration = librosa.get_duration(y=y, sr=sr)
+        
+        # Get BPM
+        bpm_data = detect_bpm(req.audio_path)
+        
+        # Find the "energy peaks" — sections with most vocals/music
+        # Use RMS energy to find the best 30-second segment
+        hop_length = 512
+        rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=hop_length)[0]
+        rms_times = librosa.frames_to_time(
+            range(len(rms)), sr=sr, hop_length=hop_length
+        ).tolist()
+        
+        # Find the most energetic window (up to 60s, or full track if shorter)
+        target_window = min(60.0, duration)
+        if duration <= target_window:
+            best_start = 0.0
+            best_end = duration
+        else:
+            best_start = 0.0
+            best_energy = 0.0
+            step = 1.0  # check every 1 second
+            for start_t in range(0, int(duration - target_window), int(step)):
+                end_t = start_t + target_window
+                start_idx = int(start_t * sr / hop_length)
+                end_idx = int(end_t * sr / hop_length)
+                if end_idx > len(rms):
+                    break
+                energy = float(rms[start_idx:end_idx].mean())
+                if energy > best_energy:
+                    best_energy = energy
+                    best_start = float(start_t)
+            best_end = best_start + target_window
+        
+        return {
+            "duration": round(float(duration), 2),
+            "bpm": bpm_data["bpm"],
+            "beats": bpm_data["beats"],
+            "suggested_start": round(best_start, 2),
+            "suggested_end": round(best_end, 2),
+            "rms_times": [round(t, 3) for t in rms_times[::50]],  # downsample
+            "rms_values": [round(float(v), 4) for v in rms[::50]],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Beat-Synced Fragment Selection ───
+
+@app.post("/api/beat-sync", response_model=BeatSyncResult)
+async def api_beat_sync(req: BeatSyncRequest):
+    """Select fragments aligned to musical beats."""
+    try:
+        bpm_data = detect_bpm(req.audio_path)
+        beats = bpm_data["beats"]
+        
+        # Get beat-aligned start positions
+        starts = get_beat_aligned_starts(
+            beats=beats,
+            duration=req.duration,
+            fragment_count=req.count,
+            beat_division=req.beat_division,
+        )
+        
+        # Create fragments from starts
+        fragments = []
+        for i, start in enumerate(starts[:req.count]):
+            # Duration: pick random within min/max, but snap to next beat
+            frag_dur = min(req.max_frag, max(req.min_frag, 4.0))
+            
+            # Try to snap end to nearest beat
+            end = start + frag_dur
+            if i + 1 < len(starts):
+                end = min(starts[i + 1], start + req.max_frag)
+            
+            actual_dur = end - start
+            if actual_dur < req.min_frag:
+                continue
+            
+            fragments.append(Fragment(
+                id=len(fragments),
+                start=round(start, 3),
+                end=round(end, 3),
+                duration=round(actual_dur, 3),
+            ))
+        
+        total_dur = sum(f.duration for f in fragments)
+        
+        return BeatSyncResult(
+            bpm=bpm_data["bpm"],
+            beats=beats,
+            fragments=fragments,
+            total_duration=round(total_dur, 2),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Speech Recognition (Auto-transcribe lyrics) ───
+
+@app.post("/api/transcribe", response_model=TranscribeResult)
+async def api_transcribe(req: TranscribeRequest):
+    """Transcribe audio and get word-level lyrics with timestamps."""
+    try:
+        result = transcribe_to_lyrics(req.audio_path, language=req.language)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Transcribe with fragment selection + forced alignment ───
+
+@app.post("/api/transcribe-fragment")
+async def api_transcribe_fragment(
+    audio_path: str = Form(...),
+    language: str = Form("en"),
+    start: float = Form(0.0),
+    end: float = Form(0.0),
+    lyrics: str = Form(""),
+):
+    """Transcribe audio fragment and align with user-provided lyrics."""
+    try:
+        import tempfile
+        import subprocess
+        
+        # Extract fragment with ffmpeg
+        tmp_fragment = None
+        fragment_path = audio_path
+        
+        if end > start:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_fragment = tmp.name
+            
+            duration = end - start
+            subprocess.run([
+                "ffmpeg", "-y", "-i", audio_path,
+                "-ss", str(start), "-t", str(duration),
+                "-ar", "16000", "-ac", "1", tmp_fragment
+            ], capture_output=True, timeout=120)
+            fragment_path = tmp_fragment
+        
+        # Transcribe
+        from services.speech_recognizer import transcribe_audio
+        whisper_result = transcribe_audio(
+            fragment_path, language=language, word_timestamps=True
+        )
+        
+        # Cleanup
+        if tmp_fragment and os.path.exists(tmp_fragment):
+            os.unlink(tmp_fragment)
+        
+        user_lyrics = lyrics.strip() if lyrics else ""
+        
+        if user_lyrics:
+            # Forced alignment: use whisper timing + user's lyrics
+            # NOTE: audio fragment was already extracted, so whisper timestamps
+            # are 0-based (relative to fragment start = video timeline).
+            from services.forced_alignment import merge_transcription_with_lyrics
+            from services.bpm_detector import detect_bpm
+            
+            # Calculate actual fragment duration
+            frag_dur = 0.0
+            if end > start:
+                frag_dur = end - start
+            else:
+                import subprocess as sp
+                try:
+                    probe = sp.run(
+                        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                         "-of", "default=noprint_wrappers=1:nokey=1", fragment_path],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    frag_dur = float(probe.stdout.strip())
+                except Exception:
+                    frag_dur = 0.0
+            
+            # Get BPM and beats for beat-aware distribution
+            try:
+                bpm_result = detect_bpm(fragment_path if fragment_path != audio_path else audio_path)
+                frag_bpm = bpm_result.get("bpm", 0.0)
+                frag_beats = bpm_result.get("beats", [])
+            except Exception:
+                frag_bpm = 0.0
+                frag_beats = []
+            
+            word_timings, aligned_text = merge_transcription_with_lyrics(
+                whisper_result, user_lyrics,
+                audio_start=0,
+                fragment_duration=frag_dur,
+                bpm=frag_bpm,
+                beats=frag_beats,
+            )
+            return {
+                "text": aligned_text,
+                "words": [w.model_dump() for w in word_timings],
+                "language": whisper_result.get("language", "unknown"),
+                "method": "forced_alignment",
+                "whisper_words": len(whisper_result.get("words", [])),
+                "aligned_words": len(word_timings),
+                "bpm": frag_bpm,
+                "fragment_duration": frag_dur,
+                "word_duration": round(frag_dur / max(len(word_timings), 1), 3) if word_timings else 0,
+            }
+        else:
+            # No user lyrics — return whisper's own transcription
+            # Timestamps are already 0-based (relative to extracted fragment)
+            words = whisper_result.get("words", [])
+            
+            return {
+                "text": whisper_result.get("text", ""),
+                "words": words,
+                "language": whisper_result.get("language", "unknown"),
+                "method": "whisper_only",
+            }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Word-level subtitle split ───
+
+@app.post("/api/subtitles/word-split")
+async def api_word_split_subtitles(req: WordSubtitleRequest):
+    """Split lyrics into word-level subtitles with karaoke timing."""
+    fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
+    word_timings = [WordTiming(**w) if isinstance(w, dict) else w for w in (req.word_timings or [])]
+    
+    # Apply audio_start offset: word timings are in absolute audio coordinates
+    # Video timeline starts at 0, so subtract audio_start
+    if word_timings and req.audio_start > 0:
+        adjusted_timings = []
+        for wt in word_timings:
+            adjusted_start = wt.start - req.audio_start
+            adjusted_end = wt.end - req.audio_start
+            # Only include words that fall within the video timeline (>= 0)
+            if adjusted_end > 0:
+                adjusted_timings.append(WordTiming(
+                    word=wt.word,
+                    start=round(max(0, adjusted_start), 3),
+                    end=round(adjusted_end, 3),
+                    probability=wt.probability,
+                ))
+        word_timings = adjusted_timings
+    
+    subtitles = split_lyrics_word_level(
+        lyrics=req.lyrics,
+        fragments=fragments,
+        word_timings=word_timings if word_timings else None,
+    )
+    return {"subtitles": [s.model_dump() for s in subtitles]}
+
+
+@app.post("/api/subtitles/adjust")
+async def api_adjust_subtitles(req: SubtitleAdjustRequest):
+    """Apply global stretch/offset to word timings and regenerate subtitles."""
+    fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
+    word_timings = [WordTiming(**w) if isinstance(w, dict) else w for w in (req.word_timings or [])]
+    
+    stretch = req.stretch
+    offset = req.audio_start
+    
+    if word_timings and (stretch != 1.0 or offset != 0.0):
+        adjusted = []
+        for wt in word_timings:
+            new_start = wt.start * stretch + offset
+            new_end = wt.end * stretch + offset
+            if new_end > 0:
+                adjusted.append(WordTiming(
+                    word=wt.word,
+                    start=round(max(0, new_start), 3),
+                    end=round(new_end, 3),
+                ))
+        word_timings = adjusted
+    
+    subtitles = split_lyrics_word_level(
+        lyrics=req.lyrics,
+        fragments=fragments,
+        word_timings=word_timings if word_timings else None,
+    )
+    return {
+        "subtitles": [s.model_dump() for s in subtitles],
+        "words": [w.model_dump() for w in word_timings],
+    }
 
 
 if __name__ == "__main__":
