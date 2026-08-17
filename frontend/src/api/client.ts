@@ -157,6 +157,19 @@ export const api = {
     return postForm(`${API_BASE}/transcribe-fragment`, form);
   },
 
+  // ─── NEW: Transcribe ENTIRE audio (absolute timestamps) ───
+  transcribeFull: (
+    audioPath: string,
+    language: string = 'en',
+    lyrics?: string,
+  ): Promise<TranscribeResult & { total_duration?: number; bpm?: number }> => {
+    const form = new FormData();
+    form.append('audio_path', audioPath);
+    form.append('language', language);
+    if (lyrics) form.append('lyrics', lyrics);
+    return postForm(`${API_BASE}/transcribe-full`, form);
+  },
+
   downloadUrl: (filename: string) => `${API_BASE}/download/${filename}`,
   thumbnailUrl: (filename: string) => `${API_BASE}/thumbnail/${filename}`,
 };

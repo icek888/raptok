@@ -238,6 +238,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events = []
     
     if karaoke:
+        # ── Auto mode: choose ONE mode for the entire video ──
+        # Count how many lines are "too long" vs "short"
+        if display_mode == "auto":
+            long_lines = 0
+            short_lines = 0
+            for sub in subtitles:
+                if not sub.words:
+                    continue
+                line_text = " ".join(w.word for w in sub.words)
+                num_words = len(sub.words)
+                if len(line_text) > 30 or num_words > 6:
+                    long_lines += 1
+                else:
+                    short_lines += 1
+            # If majority of lines are long → single_word for ALL
+            # Otherwise → line_highlight for ALL
+            effective_mode = "single_word" if long_lines > short_lines else "line_highlight"
+        else:
+            effective_mode = display_mode
+        
         for sub in subtitles:
             if not sub.words:
                 start = _format_time(sub.start)
@@ -247,57 +267,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             
             words = sub.words
             
-            # Auto-detect: if line is too long (many words or long text), use single-word mode
-            line_text = " ".join(w.word for w in words)
-            line_len = len(line_text)
-            num_words = len(words)
-            # Threshold: > 30 chars or > 6 words → likely won't fit on 9:16
-            too_long = line_len > 30 or num_words > 6
-            
-            if display_mode == "word_by_word" or (too_long and display_mode == "auto"):
-                # MODE 1: Each word appears individually, one at a time
-                # Past words fade, current word bright, future words invisible
+            if effective_mode in ("word_by_word", "single_word"):
+                # MODE 1: Only the active word shown at a time (matches preview)
                 for i, wt in enumerate(words):
                     word_start = _format_time(wt.start)
                     word_end = _format_time(wt.end)
                     
-                    if too_long and display_mode == "auto":
-                        # Auto-fallback: show ONLY the current word (big + centered)
-                        events.append(
-                            f"Dialogue: 0,{word_start},{word_end},Default,,0,0,0,,"
-                            f"{{\\fscx130\\fscy130}}{wt.word}{{\\fscx100\\fscy100}}"
-                        )
-                    else:
-                        # Word-by-word: show all words, only active is visible
-                        text_parts = []
-                        for j, w in enumerate(words):
-                            if j < i:
-                                text_parts.append(f"{{\\alpha&HCC&}}{w.word}{{\\alpha&H00&}} ")
-                            elif j == i:
-                                text_parts.append(f"{{\\fscx120\\fscy120}}{w.word}{{\\fscx100\\fscy100}} ")
-                            else:
-                                text_parts.append(f"{{\\alpha&HFF&}}{w.word}{{\\alpha&H00&}} ")
-                        
-                        text = "".join(text_parts).rstrip()
-                        events.append(f"Dialogue: 0,{word_start},{word_end},Default,,0,0,0,,{text}")
-            
-            elif display_mode == "single_word":
-                # MODE: Only current word shown (big, centered) — no context
-                for i, wt in enumerate(words):
-                    word_start = _format_time(wt.start)
-                    word_end = _format_time(wt.end)
+                    # Only current word shown — big, centered, yellow
                     events.append(
                         f"Dialogue: 0,{word_start},{word_end},Default,,0,0,0,,"
-                        f"{{\\fscx130\\fscy130}}{wt.word}{{\\fscx100\\fscy100}}"
+                        f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{wt.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
                     )
             
             else:
-                # MODE 2: line_highlight — full line visible, words highlight one-by-one
-                # Classic karaoke: all words shown in dim color, active word bright gold
-                line_start = _format_time(sub.start)
-                line_end = _format_time(sub.end)
+                # MODE 2: line_highlight — full line visible, active word yellow + bigger
+                line_text = " ".join(w.word for w in words)
+                num_words = len(words)
+                too_long = len(line_text) > 30 or num_words > 6
                 
-                # If too long, split into chunks of max 4 words
                 if too_long and num_words > 6:
                     # Split into chunks and show as separate dialogue lines
                     chunk_size = 4
@@ -307,20 +294,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             continue
                         chunk_start = _format_time(chunk[0].start)
                         chunk_end = _format_time(chunk[-1].end)
-                        text_parts = []
-                        for w in chunk:
-                            dur = max(0.1, w.end - w.start)
-                            text_parts.append(f"{{\\kf{dur * 100:.0f}}}{w.word} ")
-                        text = "".join(text_parts).rstrip()
-                        events.append(f"Dialogue: 0,{chunk_start},{chunk_end},Default,,0,0,0,,{text}")
+                        # Each word gets its own Dialogue line — active word is yellow+big
+                        for i, w in enumerate(chunk):
+                            w_start = _format_time(w.start)
+                            w_end = _format_time(w.end)
+                            events.append(
+                                f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
+                                f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{w.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
+                            )
                 else:
-                    # Single dialogue line for entire subtitle
-                    text_parts = []
+                    # Each word gets its own Dialogue — only active word visible (yellow, big)
                     for w in words:
-                        dur = max(0.1, w.end - w.start)
-                        text_parts.append(f"{{\\kf{dur * 100:.0f}}}{w.word} ")
-                    text = "".join(text_parts).rstrip()
-                    events.append(f"Dialogue: 0,{line_start},{line_end},Default,,0,0,0,,{text}")
+                        w_start = _format_time(w.start)
+                        w_end = _format_time(w.end)
+                        events.append(
+                            f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
+                            f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{w.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
+                        )
     else:
         # Regular subtitles
         for sub in subtitles:

@@ -43,6 +43,11 @@ export function SubtitleEditor({
   const [showWordEditor, setShowWordEditor] = useState(false);
   const [showSyncPanel, setShowSyncPanel] = useState(true);
 
+  // ── Full-track word timings (absolute timestamps from whisper) ──
+  // Once transcribed, we filter these by audioStart/audioEnd locally
+  const [fullTrackWords, setFullTrackWords] = useState<WordTiming[]>([]);
+  const [hasFullTranscription, setHasFullTranscription] = useState(false);
+
   // ── Audio URL for preview ──
   const audioUrl = audioPath ? `/api/audio-preview/${audioPath.split('/').pop()}` : null;
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -98,26 +103,28 @@ export function SubtitleEditor({
     if (audio) audio.currentTime = t;
   }, []);
 
-  // ── Range change ──
-  const handleRangeChange = (start: number, end: number) => {
-    setAudioStart(start);
-    setAudioEnd(end);
-  };
-
-  // ── Transcribe + Forced Alignment ──
+  // ── Transcribe ENTIRE track once + filter by range locally ──
   const handleTranscribe = async () => {
     if (!audioPath) return;
     setTranscribing(true);
     try {
-      const result = await api.transcribeFragment(
-        audioPath, transcribeLang, audioStart, audioEnd, lyrics,
-      );
-      onWordTimingsChange(result.words);
-      // Generate subtitles from word timings (audio_start=0, already adjusted)
+      // Transcribe the FULL audio track (not just the fragment)
+      const result = await api.transcribeFull(audioPath, transcribeLang, lyrics);
+      
+      // Store absolute word timings for the entire track
+      setFullTrackWords(result.words);
+      setHasFullTranscription(true);
+      
+      // Filter words to the selected range and convert to video-relative timestamps
+      const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
+      onWordTimingsChange(filtered);
+      
+      // Generate subtitles from filtered word timings
       const subResult = await api.wordSplitSubtitles(
-        lyrics || result.text, fragments, result.words, 0,
+        lyrics || result.text, fragments, filtered, 0,
       );
       onSubtitlesChange(subResult.subtitles);
+      
       // Reset stretch/offset since we have fresh timings
       setStretch(1.0);
       setOffset(0.0);
@@ -126,6 +133,38 @@ export function SubtitleEditor({
     } finally {
       setTranscribing(false);
     }
+  };
+
+  // ── Filter absolute word timings to selected range → video-relative ──
+  const filterWordsByRange = (allWords: WordTiming[], start: number, end: number): WordTiming[] => {
+    return allWords
+      .filter(w => w.end > start && w.start < end)  // word overlaps with [start, end]
+      .map(w => ({
+        ...w,
+        start: Math.max(0, w.start - start),  // convert to video-relative (0-based)
+        end: Math.max(0, w.end - start),
+      }));
+  };
+
+  // ── When range changes, re-filter locally (NO API call!) ──
+  const handleRangeChange = (start: number, end: number) => {
+    setAudioStart(start);
+    setAudioEnd(end);
+    
+    if (hasFullTranscription && fullTrackWords.length > 0) {
+      // Filter locally — instant, no server round-trip
+      const filtered = filterWordsByRange(fullTrackWords, start, end);
+      onWordTimingsChange(filtered);
+      
+      // Regenerate subtitles from filtered words
+      if (lyrics && fragments.length > 0) {
+        api.wordSplitSubtitles(lyrics, fragments, filtered, 0)
+          .then(r => onSubtitlesChange(r.subtitles))
+          .catch(e => console.error('Word split failed:', e));
+      }
+    }
+    
+    onAudioStartChange?.(start);
   };
 
   // ── Word Split (even distribution) ──
@@ -343,10 +382,15 @@ export function SubtitleEditor({
               className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition disabled:opacity-40"
             >
               {transcribing ? <Loader2 size={12} className="animate-spin" /> : <Mic size={12} />}
-              {lyrics.trim() ? 'Transcribe & Align' : 'Transcribe'}
+              {hasFullTranscription ? '✓ Re-transcribe' : (lyrics.trim() ? 'Transcribe & Align' : 'Transcribe')}
             </button>
             {wordTimings.length > 0 && (
-              <span className="text-xs text-green-400">✓ {wordTimings.length} words</span>
+              <span className="text-xs text-green-400">
+                ✓ {wordTimings.length} words{hasFullTranscription ? ' (filtered)' : ''}
+              </span>
+            )}
+            {hasFullTranscription && (
+              <span className="text-xs text-blue-400">📜 Full track ready — drag range to filter</span>
             )}
           </div>
         </div>
@@ -719,8 +763,10 @@ export function SubtitleEditor({
       {subtitles.length === 0 && (
         <div className="text-center py-8 text-gray-500 text-sm">
           {audioPath
-            ? 'Select audio range → click "Transcribe & Align" for auto-lyrics sync'
-            : 'Upload audio → paste lyrics → Transcribe & Align'}
+            ? (hasFullTranscription
+                ? '✅ Full track transcribed — drag range sliders to filter words instantly'
+                : 'Select audio range → click "Transcribe & Align" — recognizes FULL track, then filters by range')
+            : 'Upload audio → paste lyrics → Transcribe & Align (full track)'}
         </div>
       )}
     </div>

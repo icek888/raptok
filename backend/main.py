@@ -1,6 +1,7 @@
 """RapTok API — main FastAPI app."""
 import os
 import shutil
+import logging
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
@@ -22,6 +23,9 @@ from services.subtitle_generator import split_lyrics, split_lyrics_word_level, g
 from services.video_renderer import render_clip
 from services.bpm_detector import detect_bpm, get_beat_aligned_starts
 from services.speech_recognizer import transcribe_to_lyrics
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="RapTok API", version="0.1.0")
 
@@ -115,6 +119,12 @@ async def api_render(req: RenderRequest):
     try:
         fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
         subtitles = [SubtitleLine(**s) if isinstance(s, dict) else s for s in req.subtitles]
+        
+        # DEBUG: Log what we receive
+        words_count = sum(len(s.words) for s in subtitles if s.words)
+        logger.info(f"Render: {len(subtitles)} subs, {words_count} words, karaoke={req.karaoke}, mode={req.display_mode}")
+        for i, s in enumerate(subtitles[:3]):
+            logger.info(f"  sub[{i}]: text='{s.text[:30]}', words={len(s.words) if s.words else 0}")
         
         # If audio_start is set, extract the fragment from audio first
         audio_path = req.audio_path
@@ -335,7 +345,90 @@ async def api_transcribe(req: TranscribeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ─── Transcribe with fragment selection + forced alignment ───
+# ─── Full transcription (transcribe entire audio once) ───
+
+@app.post("/api/transcribe-full")
+async def api_transcribe_full(
+    audio_path: str = Form(...),
+    language: str = Form("en"),
+    lyrics: str = Form(""),
+):
+    """Transcribe ENTIRE audio track once. Returns absolute word timestamps.
+    
+    Frontend can then filter words by any selected range without re-calling this endpoint.
+    If lyrics provided, forced alignment is applied to the full track.
+    """
+    try:
+        from services.speech_recognizer import transcribe_audio
+        from services.forced_alignment import merge_transcription_with_lyrics
+        from services.bpm_detector import detect_bpm
+        from services.stem_separator import separate_vocals
+        
+        # ── Step 1: Separate vocals from the full mix ──
+        # Whisper works much better on isolated vocals — no music interference
+        # = cleaner word boundaries, fewer missed words, tighter timestamps
+        try:
+            vocal_path = await separate_vocals(audio_path, method="auto")
+            whisper_input = vocal_path  # Use isolated vocals
+            logger.info(f"Using isolated vocals for whisper: {vocal_path}")
+        except Exception as e:
+            logger.warning(f"Stem separation failed ({e}), using original audio")
+            whisper_input = audio_path  # Fallback to original
+        
+        # Transcribe the FULL audio (no fragment extraction!)
+        whisper_result = transcribe_audio(whisper_input, language=language, word_timestamps=True)
+        
+        user_lyrics = lyrics.strip() if lyrics else ""
+        
+        if user_lyrics:
+            # Forced alignment on the full track
+            try:
+                bpm_result = detect_bpm(audio_path)
+                full_bpm = bpm_result.get("bpm", 0.0)
+                full_beats = bpm_result.get("beats", [])
+            except Exception:
+                full_bpm = 0.0
+                full_beats = []
+            
+            # Get total duration for BPM-aware fallback
+            import librosa
+            y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=30)
+            full_duration = librosa.get_duration(y=y, sr=sr)
+            # Actually load full duration
+            full_duration = librosa.get_duration(path=audio_path)
+            from services.wav2vec_alignment import align_lyrics_with_mms
+            word_timings, aligned_text = align_lyrics_with_mms(
+                audio_path, whisper_result.get("words", []), user_lyrics,
+                audio_start=0,  # Full track, no offset
+                fragment_duration=full_duration,
+                bpm=full_bpm,
+                beats=full_beats,
+            )
+            return {
+                "text": aligned_text,
+                "words": [w.model_dump() for w in word_timings],
+                "language": whisper_result.get("language", "unknown"),
+                "method": "mms_alignment",
+                "whisper_words": len(whisper_result.get("words", [])),
+                "aligned_words": len(word_timings),
+                "bpm": full_bpm,
+                "total_duration": round(full_duration, 2),
+            }
+        else:
+            # No lyrics — return whisper's own transcription
+            words = whisper_result.get("words", [])
+            return {
+                "text": whisper_result.get("text", ""),
+                "words": words,
+                "language": whisper_result.get("language", "unknown"),
+                "method": "whisper_only",
+            }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Transcribe with fragment selection + forced alignment (LEGACY) ───
 
 @app.post("/api/transcribe-fragment")
 async def api_transcribe_fragment(
@@ -409,24 +502,23 @@ async def api_transcribe_fragment(
             except Exception:
                 frag_bpm = 0.0
                 frag_beats = []
-            
-            word_timings, aligned_text = merge_transcription_with_lyrics(
-                whisper_result, user_lyrics,
-                audio_start=0,
-                fragment_duration=frag_dur,
-                bpm=frag_bpm,
-                beats=frag_beats,
+            from services.wav2vec_alignment import align_lyrics_with_mms
+            word_timings, aligned_text = align_lyrics_with_mms(
+                audio_path, whisper_result.get("words", []), user_lyrics,
+                audio_start=0,  # Full track, no offset
+                fragment_duration=full_duration,
+                bpm=full_bpm,
+                beats=full_beats,
             )
             return {
                 "text": aligned_text,
                 "words": [w.model_dump() for w in word_timings],
                 "language": whisper_result.get("language", "unknown"),
-                "method": "forced_alignment",
+                "method": "mms_alignment",
                 "whisper_words": len(whisper_result.get("words", [])),
                 "aligned_words": len(word_timings),
-                "bpm": frag_bpm,
-                "fragment_duration": frag_dur,
-                "word_duration": round(frag_dur / max(len(word_timings), 1), 3) if word_timings else 0,
+                "bpm": full_bpm,
+                "total_duration": round(full_duration, 2),
             }
         else:
             # No user lyrics — return whisper's own transcription
@@ -508,6 +600,27 @@ async def api_adjust_subtitles(req: SubtitleAdjustRequest):
         "subtitles": [s.model_dump() for s in subtitles],
         "words": [w.model_dump() for w in word_timings],
     }
+
+
+# ─── Stem Separation (vocal isolation) ───
+
+@app.post("/api/stem-separate")
+async def api_stem_separate(
+    audio_path: str = Form(...),
+    method: str = Form("auto"),
+):
+    """Separate vocals from instrumental. Returns paths to stems."""
+    try:
+        from services.stem_separator import separate_vocals_with_stems
+        
+        stems = await separate_vocals_with_stems(audio_path, method=method)
+        
+        return {
+            "stems": stems,
+            "method": "ml" if "drums" in stems else "ffmpeg",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

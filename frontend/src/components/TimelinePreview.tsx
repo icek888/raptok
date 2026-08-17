@@ -159,13 +159,18 @@ export function TimelinePreview({
               return (
                 <div className="absolute left-3 right-3 text-center pointer-events-none" style={posStyle}>
                   {(() => {
-                    // Determine effective mode
-                    const currentSub = currentSubs[0];
-                    const subWords = currentSub?.words || [];
-                    const lineText = subWords.map(w => w.word).join(' ');
-                    const tooLong = lineText.length > 30 || subWords.length > 6;
+                    // ── Auto mode: choose ONE mode for entire track ──
+                    // Count long vs short lines across ALL subtitles
+                    let longLines = 0;
+                    let shortLines = 0;
+                    for (const sub of subtitles) {
+                      if (!sub.words) continue;
+                      const lineText = sub.words.map(w => w.word).join(' ');
+                      if (lineText.length > 30 || sub.words.length > 6) longLines++;
+                      else shortLines++;
+                    }
                     const effectiveMode = displayMode === 'auto'
-                      ? (tooLong ? 'single_word' : 'line_highlight')
+                      ? (longLines > shortLines ? 'single_word' : 'line_highlight')
                       : displayMode;
 
                     if (effectiveMode === 'single_word') {
