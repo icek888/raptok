@@ -29,7 +29,14 @@ RUN pip install --no-cache-dir \
     samplerate==0.1.0 onnx2torch-py313 diffq onnx-weekly
 RUN pip install --no-cache-dir torchvision==0.28.0+cpu --index-url https://download.pytorch.org/whl/cpu
 
+# Install WhisperX (faster-whisper + wav2vec2 alignment + VAD)
+# Replaces faster-whisper + MMS FA with a single, more accurate pipeline
+RUN pip install --no-cache-dir whisperx
+
 COPY . .
+
+# Custom Cyrillic fonts are copied at runtime via docker volume
+# (see docker-compose.yml volume mount for fonts)
 
 EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

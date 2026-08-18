@@ -43,9 +43,11 @@ export interface SubtitleStyle {
   font: string;
   size: number;
   primary_color: string;
+  active_color: string;
   outline_color: string;
   outline_width: number;
   position: 'bottom' | 'center' | 'top';
+  margin_v: number;
   bold: boolean;
 }
 
@@ -103,4 +105,22 @@ export interface AudioInfo {
   suggested_end: number;
   rms_times: number[];
   rms_values: number[];
+}
+
+// ─── Render Templates ───
+
+export interface RenderTemplate {
+  id: string;
+  name: string;
+  description: string;
+  font: string;
+  size: number;
+  primary_color: string;
+  active_color: string;
+  position: string;
+  display_mode: string;
+  video_mode: string;
+  blur_sigma: number;
+  dark_overlay: number;
+  scale_factor: number;
 }

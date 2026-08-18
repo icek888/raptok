@@ -1,6 +1,6 @@
 import type { 
   VideoInfo, Fragment, FragmentSelection, SubtitleLine, SubtitleStyle, 
-  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo 
+  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate
 } from '../types';
 
 const API_BASE = '/api';
@@ -92,6 +92,7 @@ export const api = {
     karaoke: boolean = false,
     audioStart: number = 0,
     displayMode: string = 'line_highlight',
+    templateId: string = '',
   ): Promise<RenderResult> =>
     postJSON(`${API_BASE}/render`, {
       video_path: videoPath,
@@ -102,7 +103,11 @@ export const api = {
       style,
       karaoke,
       display_mode: displayMode,
+      template_id: templateId,
     }),
+
+  getTemplates: (): Promise<{ templates: RenderTemplate[] }> =>
+    fetch(`${API_BASE}/templates`).then(r => r.json()),
 
   uploadAudio: (file: File): Promise<{ path: string; filename: string; size: number }> => {
     const form = new FormData();
@@ -185,8 +190,10 @@ export const defaultStyle: SubtitleStyle = {
   font: 'Arial',
   size: 48,
   primary_color: '&H00FFFFFF',
+  active_color: '&H00D7FF',
   outline_color: '&H00000000',
   outline_width: 3,
   position: 'bottom',
+  margin_v: 80,
   bold: true,
 };

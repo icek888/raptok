@@ -23,16 +23,16 @@ def render_clip(
     progress_callback=None,
     karaoke: bool = False,
     display_mode: str = "line_highlight",
+    template: dict | None = None,
 ) -> str:
     """
     Render a TikTok-format clip (1080x1920) from fragments with subtitles and custom audio.
     
-    Multi-step pipeline:
-    1. Extract each fragment from source video -> individual clips
-    2. Concatenate all clips into one horizontal video
-    3. Scale to 1080x1920 TikTok format (blur background + overlay)
-    4. Burn subtitles (ASS format)
-    5. Replace audio with user's track
+    If template is provided, applies template-specific:
+    - blur_sigma: background blur strength
+    - dark_overlay: 0.0-1.0 darkening of background
+    - scale_factor: video scale (1.0 = full, 0.85 = smaller)
+    - All subtitle style + effects
     
     Returns path to the output MP4.
     """
@@ -43,7 +43,11 @@ def render_clip(
     work_dir.mkdir(exist_ok=True)
     
     # Step 1: Generate ASS subtitle file
-    ass_path = generate_ass(subtitles, style, job_id, karaoke=karaoke, display_mode=display_mode)
+    ass_path = generate_ass(
+        subtitles, style, job_id,
+        karaoke=karaoke, display_mode=display_mode,
+        template=template,
+    )
     
     # Step 2: Extract each fragment
     frag_paths = []
@@ -105,16 +109,51 @@ def render_clip(
     # Step 4: Scale to TikTok format + blur background + burn subtitles
     output_path = OUTPUT_DIR / f"raptok_{job_id}.mp4"
     
-    # TikTok format: 1080x1920 (9:16)
-    # Scale video to fit width, center vertically, blur bg fills rest
-    scale_filter = (
-        f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black[padded];"
-        f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-        f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma=20[bg];"
-        f"[bg][padded]overlay=0:0[withbg];"
-        f"[withbg]subtitles={ass_path}[final]"
-    )
+    # Template overrides for video rendering
+    video_mode = "fit_blur"
+    blur_sigma = 20
+    dark_overlay = 0.0
+    scale_factor = 1.0
+    if template:
+        video_mode = template.get("video_mode", "fit_blur")
+        blur_sigma = template.get("blur_sigma", 20)
+        dark_overlay = template.get("dark_overlay", 0.0)
+        scale_factor = template.get("scale_factor", 1.0)
+    
+    # Build scale filter based on video_mode:
+    # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)
+    # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
+    # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
+    if video_mode == "crop_fill":
+        # Full-screen zoomed video — no blur, no bars, no overlay
+        scale_filter = (
+            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
+            f"subtitles={ass_path}[final]"
+        )
+    elif video_mode == "fit_blur_dark":
+        # Clear video centered + dark blurred bg behind
+        scaled_w = int(OUTPUT_WIDTH * scale_factor)
+        scaled_h = int(OUTPUT_HEIGHT * scale_factor)
+        scale_filter = (
+            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black[padded];"
+            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
+            f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
+            f"[bg][padded]overlay=0:0[withbg];"
+            f"[withbg]subtitles={ass_path}[final]"
+        )
+    else:
+        # fit_blur (default) — clear video + blurred bg
+        scale_filter = (
+            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black[padded];"
+            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
+            f"[bg][padded]overlay=0:0[withbg];"
+            f"[withbg]subtitles={ass_path}[final]"
+        )
     
     cmd = [
         "ffmpeg", "-y",

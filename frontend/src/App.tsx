@@ -29,6 +29,7 @@ function App() {
   const [bpmData, setBpmData] = useState<BPMResult | null>(null);
   const [karaoke, setKaraoke] = useState(true);
   const [displayMode, setDisplayMode] = useState<'auto' | 'line_highlight' | 'word_by_word' | 'single_word'>('auto');
+  const [templateId, setTemplateId] = useState('');
   const [beatDivision, setBeatDivision] = useState('1/4');
   const [audioStart, setAudioStart] = useState(0);
 
@@ -56,7 +57,7 @@ function App() {
     <div className="min-h-screen bg-[#0a0a0f] text-gray-100">
       {/* Header */}
       <header className="border-b border-[#1a1a2a] bg-[#0a0a0f]/95 backdrop-blur sticky top-0 z-50">
-        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-[1800px] mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl flex items-center justify-center glow-purple">
               <Music size={20} className="text-white" />
@@ -81,7 +82,7 @@ function App() {
       </header>
 
       {/* Step indicator */}
-      <div className="max-w-5xl mx-auto px-6 py-6">
+      <div className="max-w-[1800px] mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-8">
           {STEPS.map((s, i) => {
             const Icon = s.icon;
@@ -155,6 +156,8 @@ function App() {
               onAudioStartChange={setAudioStart}
               style={style}
               onStyleChange={setStyle}
+              templateId={templateId}
+              onTemplateChange={setTemplateId}
             />
           )}
 
@@ -168,6 +171,7 @@ function App() {
               style={style}
               karaoke={karaoke}
               displayMode={displayMode}
+              templateId={templateId}
             />
           )}
         </div>

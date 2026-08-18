@@ -65,6 +65,8 @@ def _download_youtube(url: str, job_id: str) -> dict:
         "-f", "best[height<=720][ext=mp4]/best[ext=mp4]/best",
         "-o", str(output_path),
         "--no-playlist",
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=android",
         url
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)

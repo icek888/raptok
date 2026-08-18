@@ -57,11 +57,116 @@ class FragmentReplaceRequest(BaseModel):
 class SubtitleStyle(BaseModel):
     font: str = "Arial"
     size: int = 72
-    primary_color: str = "&H00FFFFFF"  # white
+    primary_color: str = "&H00FFFFFF"  # white (inactive text)
+    active_color: str = "&H00D7FF"  # yellow (active word highlight)
     outline_color: str = "&H00000000"  # black
     outline_width: int = 4
     position: str = "bottom"  # bottom, center, top
+    margin_v: int = 80  # vertical margin from edge (px in 1080x1920 space)
     bold: bool = True
+
+
+# ─── Render Templates ───
+
+class RenderTemplate(BaseModel):
+    """Predefined render template — controls subtitles + video look."""
+    id: str
+    name: str
+    description: str
+    # Subtitle style
+    font: str
+    size: int
+    primary_color: str
+    active_color: str
+    outline_color: str
+    outline_width: int
+    position: str
+    margin_v: int
+    bold: bool
+    # Video rendering
+    video_mode: str = "fit_blur"   # fit_blur, crop_fill, fit_blur_dark
+    blur_sigma: int = 20       # background blur strength
+    dark_overlay: float = 0.0  # 0.0-1.0, darkens background video
+    scale_factor: float = 1.0  # 1.0 = full width, 0.85 = smaller video
+    display_mode: str = "line_highlight"
+    karaoke: bool = True
+    # ASS effects
+    active_scale: int = 130    # % scale for active word (130 = 1.3x)
+    glow_border: int = 0       # 0 = none, >0 = glow border width
+    fade_in: bool = False      # fade in each word
+
+
+TEMPLATES = [
+    RenderTemplate(
+        id="cinematic",
+        name="Cinematic",
+        description="Clear 16:9 video centered, blurred video as background",
+        font="Montserrat",
+        size=68,
+        primary_color="&H00FFFFFF",   # white
+        active_color="&H0017D6FF",    # gold (#FFD717 in RGB → BGR)
+        outline_color="&H00000000",   # black
+        outline_width=3,
+        position="bottom",
+        margin_v=140,
+        bold=True,
+        video_mode="fit_blur",        # clear video centered, blurred bg
+        blur_sigma=25,
+        dark_overlay=0.0,             # no dark overlay — see bg clearly
+        scale_factor=1.0,
+        display_mode="line_highlight",
+        karaoke=True,
+        active_scale=130,
+        glow_border=0,
+        fade_in=False,
+    ),
+    RenderTemplate(
+        id="big_words",
+        name="Big Words",
+        description="Full-screen zoomed video, huge text, no black bars",
+        font="Oswald",
+        size=110,
+        primary_color="&H00FFFFFF",   # white
+        active_color="&H00FFE600",    # cyan (#00E5FF → BGR)
+        outline_color="&H00000000",   # black
+        outline_width=5,
+        position="center",
+        margin_v=0,
+        bold=True,
+        video_mode="crop_fill",       # zoom to fill 9:16, no bars
+        blur_sigma=0,                 # no blur — full screen video
+        dark_overlay=0.0,
+        scale_factor=1.0,
+        display_mode="single_word",
+        karaoke=True,
+        active_scale=140,
+        glow_border=0,
+        fade_in=True,
+    ),
+    RenderTemplate(
+        id="neon_pop",
+        name="Neon Pop",
+        description="Clear video center, dark blurred background, neon glow",
+        font="Russo One",
+        size=85,
+        primary_color="&H00FFFFFF",   # white
+        active_color="&H0020D6E6",    # neon pink (#E6D620 → BGR)
+        outline_color="&H000A0A0A",   # near-black
+        outline_width=2,
+        position="center",
+        margin_v=200,
+        bold=True,
+        video_mode="fit_blur_dark",   # clear video + dark blurred bg
+        blur_sigma=50,
+        dark_overlay=0.55,
+        scale_factor=0.85,
+        display_mode="single_word",
+        karaoke=True,
+        active_scale=150,
+        glow_border=12,
+        fade_in=False,
+    ),
+]
 
 
 class WordTiming(BaseModel):
@@ -94,6 +199,7 @@ class RenderRequest(BaseModel):
     style: SubtitleStyle = SubtitleStyle()
     karaoke: bool = False
     display_mode: str = "line_highlight"
+    template_id: str = ""  # If set, overrides style/display_mode with template
 
 
 class RenderStatus(BaseModel):

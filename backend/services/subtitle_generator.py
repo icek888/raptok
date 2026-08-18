@@ -1,6 +1,7 @@
 """Subtitle generator — split lyrics, create ASS with word-by-word karaoke sync."""
 from models.schemas import SubtitleLine, SubtitleStyle, WordTiming
 from pathlib import Path
+from typing import Optional
 from config import TEMP_DIR
 
 
@@ -193,6 +194,7 @@ def generate_ass(
     job_id: str = "subs",
     karaoke: bool = False,
     display_mode: str = "line_highlight",
+    template: Optional[dict] = None,
 ) -> str:
     """
     Generate an ASS subtitle file.
@@ -200,19 +202,46 @@ def generate_ass(
     display_mode:
     - "word_by_word": each word appears individually, one at a time
     - "line_highlight": full line shown, words highlight one-by-one (classic karaoke)
+    
+    If template is provided, it overrides style/display_mode with template values:
+    - active_scale: % scale for active word (130 = 1.3x)
+    - glow_border: glow border width (0 = none)
+    - fade_in: fade in each word
     """
     output_path = TEMP_DIR / f"{job_id}.ass"
     
-    primary = style.primary_color
-    outline = style.outline_color
+    # Apply template overrides if provided
+    if template:
+        font = template.get("font", style.font)
+        size = template.get("size", style.size)
+        primary = template.get("primary_color", style.primary_color)
+        outline = template.get("outline_color", style.outline_color)
+        active = template.get("active_color", style.active_color)
+        outline_w = template.get("outline_width", style.outline_width)
+        position = template.get("position", style.position)
+        margin_v = template.get("margin_v", style.margin_v)
+        bold_flag = "-1" if template.get("bold", style.bold) else "0"
+        display_mode = template.get("display_mode", display_mode)
+        karaoke = template.get("karaoke", karaoke)
+        active_scale = template.get("active_scale", 130)
+        glow_border = template.get("glow_border", 0)
+        fade_in = template.get("fade_in", False)
+    else:
+        font = style.font
+        size = style.size
+        primary = style.primary_color
+        outline = style.outline_color
+        active = style.active_color
+        outline_w = style.outline_width
+        position = style.position
+        margin_v = style.margin_v if style.margin_v > 0 else 80
+        bold_flag = "-1" if style.bold else "0"
+        active_scale = 130
+        glow_border = 0
+        fade_in = False
     
     alignment_map = {"bottom": 2, "center": 8, "top": 10}
-    alignment = alignment_map.get(style.position, 2)
-    
-    bold_flag = "-1" if style.bold else "0"
-    
-    # Karaoke highlight color (gold/yellow for active word)
-    karaoke_color = "&H0000CCFF"  # warm gold
+    alignment = alignment_map.get(position, 2)
     
     ass_header = f"""[Script Info]
 Script Type: v4.00+
@@ -222,7 +251,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{style.font},{style.size},{primary},{karaoke_color if karaoke else primary},{outline},&H64000000,{bold_flag},0,0,0,100,100,0,0,1,{style.outline_width},2,{alignment},60,60,120,1
+Style: Default,{font},{size},{primary},{active if karaoke else primary},{outline},&H64000000,{bold_flag},0,0,0,100,100,0,0,1,{outline_w},{glow_border if glow_border > 0 else 2},{alignment},60,60,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -273,10 +302,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     word_start = _format_time(wt.start)
                     word_end = _format_time(wt.end)
                     
-                    # Only current word shown — big, centered, yellow
+                    # Build effect tags from template
+                    effects = f"\\fscx{active_scale}\\fscy{active_scale}\\1c{active}&"
+                    if fade_in:
+                        effects = f"\\fade(255,255,0,0,{int((wt.end - wt.start) * 1000 / 3)},0,0){effects}"
+                    
                     events.append(
                         f"Dialogue: 0,{word_start},{word_end},Default,,0,0,0,,"
-                        f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{wt.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
+                        f"{{{effects}}}{wt.word}{{\\fscx100\\fscy100\\1c{primary}&}}"
                     )
             
             else:
@@ -294,22 +327,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                             continue
                         chunk_start = _format_time(chunk[0].start)
                         chunk_end = _format_time(chunk[-1].end)
-                        # Each word gets its own Dialogue line — active word is yellow+big
+                        # Each word gets its own Dialogue line — active word is highlighted
                         for i, w in enumerate(chunk):
                             w_start = _format_time(w.start)
                             w_end = _format_time(w.end)
+                            effects = f"\\fscx{active_scale}\\fscy{active_scale}\\1c{active}&"
+                            if fade_in:
+                                effects = f"\\fade(255,255,0,0,{int((w.end - w.start) * 1000 / 3)},0,0){effects}"
                             events.append(
                                 f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
-                                f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{w.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
+                                f"{{{effects}}}{w.word}{{\\fscx100\\fscy100\\1c{primary}&}}"
                             )
                 else:
-                    # Each word gets its own Dialogue — only active word visible (yellow, big)
+                    # Each word gets its own Dialogue — only active word visible
                     for w in words:
                         w_start = _format_time(w.start)
                         w_end = _format_time(w.end)
+                        effects = f"\\fscx{active_scale}\\fscy{active_scale}\\1c{active}&"
+                        if fade_in:
+                            effects = f"\\fade(255,255,0,0,{int((w.end - w.start) * 1000 / 3)},0,0){effects}"
                         events.append(
                             f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
-                            f"{{\\fscx130\\fscy130\\1c&H00D7FF&}}{w.word}{{\\fscx100\\fscy100\\1c&HFFFFFF&}}"
+                            f"{{{effects}}}{w.word}{{\\fscx100\\fscy100\\1c{primary}&}}"
                         )
     else:
         # Regular subtitles

@@ -25,6 +25,7 @@ services:
       - ./backend:/app
       - ./output:/output
       - ./tmp:/tmp/raptok
+      - ./frontend/public/fonts:/usr/share/fonts/truetype/custom:ro
     environment:
       - RAPTOK_TEMP_DIR=/tmp/raptok
       - RAPTOK_OUTPUT_DIR=/output

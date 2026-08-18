@@ -47,6 +47,32 @@ async def health():
     return {"status": "ok", "service": "raptok", "version": "0.1.0"}
 
 
+@app.get("/api/templates")
+async def get_templates():
+    """Return available render templates."""
+    from models.schemas import TEMPLATES
+    return {
+        "templates": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "description": t.description,
+                "font": t.font,
+                "size": t.size,
+                "primary_color": t.primary_color,
+                "active_color": t.active_color,
+                "position": t.position,
+                "display_mode": t.display_mode,
+                "video_mode": t.video_mode,
+                "blur_sigma": t.blur_sigma,
+                "dark_overlay": t.dark_overlay,
+                "scale_factor": t.scale_factor,
+            }
+            for t in TEMPLATES
+        ]
+    }
+
+
 @app.post("/api/analyze", response_model=VideoInfo)
 async def analyze_video(req: AnalyzeRequest):
     """Download video and return metadata."""
@@ -120,9 +146,34 @@ async def api_render(req: RenderRequest):
         fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
         subtitles = [SubtitleLine(**s) if isinstance(s, dict) else s for s in req.subtitles]
         
+        # Resolve template if provided
+        template_dict = None
+        if req.template_id:
+            from models.schemas import TEMPLATES
+            tmpl = next((t for t in TEMPLATES if t.id == req.template_id), None)
+            if tmpl:
+                template_dict = tmpl.model_dump()
+                # ── Override style + display_mode from template ──
+                req.style = SubtitleStyle(
+                    font=tmpl.font,
+                    size=tmpl.size,
+                    primary_color=tmpl.primary_color,
+                    active_color=tmpl.active_color,
+                    outline_color=tmpl.outline_color,
+                    outline_width=tmpl.outline_width,
+                    position=tmpl.position,
+                    margin_v=tmpl.margin_v,
+                    bold=tmpl.bold,
+                )
+                req.display_mode = tmpl.display_mode
+                req.karaoke = tmpl.karaoke
+                logger.info(f"Template applied: {tmpl.name} — font={tmpl.font}, size={tmpl.size}, mode={tmpl.display_mode}, video_mode={tmpl.video_mode}")
+            else:
+                logger.warning(f"Template not found: {req.template_id}")
+        
         # DEBUG: Log what we receive
         words_count = sum(len(s.words) for s in subtitles if s.words)
-        logger.info(f"Render: {len(subtitles)} subs, {words_count} words, karaoke={req.karaoke}, mode={req.display_mode}")
+        logger.info(f"Render: {len(subtitles)} subs, {words_count} words, template={req.template_id or 'none'}")
         for i, s in enumerate(subtitles[:3]):
             logger.info(f"  sub[{i}]: text='{s.text[:30]}', words={len(s.words) if s.words else 0}")
         
@@ -151,6 +202,7 @@ async def api_render(req: RenderRequest):
             style=req.style,
             karaoke=req.karaoke,
             display_mode=req.display_mode,
+            template=template_dict,
         )
         
         # Cleanup temp audio
@@ -360,7 +412,7 @@ async def api_transcribe_full(
     """
     try:
         from services.speech_recognizer import transcribe_audio
-        from services.forced_alignment import merge_transcription_with_lyrics
+        from services.forced_alignment import merge_transcription_with_lyrics, align_lyrics_to_timings
         from services.bpm_detector import detect_bpm
         from services.stem_separator import separate_vocals
         
@@ -375,13 +427,15 @@ async def api_transcribe_full(
             logger.warning(f"Stem separation failed ({e}), using original audio")
             whisper_input = audio_path  # Fallback to original
         
-        # Transcribe the FULL audio (no fragment extraction!)
-        whisper_result = transcribe_audio(whisper_input, language=language, word_timestamps=True)
+        # ── Step 2: WhisperX transcribe + align (wav2vec2 built-in) ──
+        # If user provided lyrics, WhisperX aligns them directly (no whisper transcription needed)
+        # If no lyrics, WhisperX transcribes and aligns in one step
+        whisper_result = transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics)
         
         user_lyrics = lyrics.strip() if lyrics else ""
         
         if user_lyrics:
-            # Forced alignment on the full track
+            # User provided lyrics — map them to whisperx aligned words via DTW
             try:
                 bpm_result = detect_bpm(audio_path)
                 full_bpm = bpm_result.get("bpm", 0.0)
@@ -390,38 +444,31 @@ async def api_transcribe_full(
                 full_bpm = 0.0
                 full_beats = []
             
-            # Get total duration for BPM-aware fallback
             import librosa
-            y, sr = librosa.load(audio_path, sr=22050, mono=True, duration=30)
-            full_duration = librosa.get_duration(y=y, sr=sr)
-            # Actually load full duration
             full_duration = librosa.get_duration(path=audio_path)
-            from services.wav2vec_alignment import align_lyrics_with_mms
-            word_timings, aligned_text = align_lyrics_with_mms(
-                audio_path, whisper_result.get("words", []), user_lyrics,
-                audio_start=0,  # Full track, no offset
-                fragment_duration=full_duration,
-                bpm=full_bpm,
-                beats=full_beats,
-            )
+            
+            whisper_words = whisper_result.get("words", [])
+            # DTW: map user lyrics onto whisperx word timestamps
+            word_timings = align_lyrics_to_timings(user_lyrics, whisper_words)
+            
             return {
-                "text": aligned_text,
-                "words": [w.model_dump() for w in word_timings],
+                "text": user_lyrics,
+                "words": [w.model_dump() if hasattr(w, 'model_dump') else w for w in word_timings],
                 "language": whisper_result.get("language", "unknown"),
-                "method": "mms_alignment",
-                "whisper_words": len(whisper_result.get("words", [])),
+                "method": "whisperx_alignment",
+                "whisper_words": len(whisper_words),
                 "aligned_words": len(word_timings),
                 "bpm": full_bpm,
                 "total_duration": round(full_duration, 2),
             }
         else:
-            # No lyrics — return whisper's own transcription
+            # No lyrics — return whisperx's own transcription with aligned timestamps
             words = whisper_result.get("words", [])
             return {
                 "text": whisper_result.get("text", ""),
                 "words": words,
                 "language": whisper_result.get("language", "unknown"),
-                "method": "whisper_only",
+                "method": "whisperx_only",
             }
         
     except Exception as e:

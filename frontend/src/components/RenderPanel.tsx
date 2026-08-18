@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle, Layout } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult } from '../types';
+import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, RenderTemplate } from '../types';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -12,15 +12,22 @@ interface Props {
   style: SubtitleStyle;
   karaoke: boolean;
   displayMode: string;
+  templateId?: string;
 }
 
-export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, style, karaoke, displayMode }: Props) {
+export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, style, karaoke, displayMode, templateId }: Props) {
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
+
+  useEffect(() => {
+    api.getTemplates().then(data => setTemplates(data.templates)).catch(() => {});
+  }, []);
 
   const canRender = videoInfo && fragments.length >= 3 && audioPath && subtitles.length > 0;
   const totalDuration = fragments.reduce((s, f) => s + f.duration, 0);
+  const selectedTemplate = templates.find(t => t.id === templateId);
 
   const handleRender = async () => {
     if (!canRender) return;
@@ -28,7 +35,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
     setError(null);
     setResult(null);
     try {
-      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode);
+      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '');
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Render failed');
@@ -43,8 +50,20 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
         <div className="text-sm text-gray-400">
           Ready to render: {fragments.length} fragments · {totalDuration.toFixed(1)}s · {subtitles.length} subtitles
           {karaoke && <span className="ml-2 text-purple-400">· karaoke mode</span>}
+          {selectedTemplate && <span className="ml-2 text-purple-400">· {selectedTemplate.name}</span>}
         </div>
       </div>
+
+      {/* Selected template indicator */}
+      {selectedTemplate && (
+        <div className="bg-purple-950/30 border border-purple-500/30 rounded-lg p-3 flex items-center gap-2">
+          <Layout size={16} className="text-purple-400" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-purple-300">{selectedTemplate.name}</div>
+            <div className="text-xs text-gray-500">{selectedTemplate.description}</div>
+          </div>
+        </div>
+      )}
 
       {/* Checklist */}
       <div className="space-y-2">

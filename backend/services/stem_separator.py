@@ -87,6 +87,7 @@ async def _separate_ml(audio_path: str, output_path: str) -> str:
 
 def _run_ml_separation(audio_path: str, output_path: str) -> str:
     """Blocking ML separation — runs in thread."""
+    import shutil
     from audio_separator.separator import Separator
     
     # Use 2-stem model (vocals + instrumental) — fastest, CPU-friendly
@@ -100,17 +101,28 @@ def _run_ml_separation(audio_path: str, output_path: str) -> str:
     # Separate
     separation = separator.separate(audio_path)
     
+    # audio-separator may return relative or absolute paths
+    # Normalize to absolute paths based on output_dir
+    output_dir = os.path.dirname(output_path)
+    
+    def _abs(stem):
+        """Ensure stem path is absolute."""
+        if os.path.isabs(stem):
+            return stem
+        return os.path.join(output_dir, stem)
+    
     # Find the vocals stem (not instrumental)
     for stem_path in separation:
-        if "vocal" in stem_path.lower() and "instrumental" not in stem_path.lower():
-            # Rename to our expected output
-            if stem_path != output_path:
-                os.rename(stem_path, output_path)
+        abs_path = _abs(stem_path)
+        if "vocal" in os.path.basename(stem_path).lower() and "instrumental" not in stem_path.lower():
+            # Move to our expected output path (shutil handles cross-device)
+            if abs_path != output_path:
+                shutil.move(abs_path, output_path)
             return output_path
     
     # If naming didn't match, take first output
     if separation:
-        os.rename(separation[0], output_path)
+        shutil.move(_abs(separation[0]), output_path)
         return output_path
     
     raise RuntimeError("ML separation produced no output")

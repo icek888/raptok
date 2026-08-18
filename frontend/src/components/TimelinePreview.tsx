@@ -1,16 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Play, Pause, SkipBack, SkipForward } from 'lucide-react';
-import type { Fragment, SubtitleLine, WordTiming, SubtitleStyle } from '../types';
-
-interface AudioInfo {
-  duration: number;
-  suggested_start: number;
-  suggested_end: number;
-  rms_times?: number[];
-  rms_values?: number[];
-  beats?: number[];
-  bpm?: number;
-}
+import type { Fragment, SubtitleLine, WordTiming, AudioInfo } from '../types';
 
 interface Props {
   fragments: Fragment[];
@@ -27,46 +17,21 @@ interface Props {
   isPlaying: boolean;
   onPlayPause: () => void;
   displayMode?: 'auto' | 'line_highlight' | 'word_by_word' | 'single_word';
-  style?: SubtitleStyle;
-}
-
-// ASS color → CSS hex
-function assToHex(ass: string): string {
-  if (!ass.startsWith('&H')) return '#ffffff';
-  const hex = ass.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-  if (hex.length < 8) return '#ffffff';
-  const r = hex.substring(6, 8);
-  const g = hex.substring(4, 6);
-  const b = hex.substring(2, 4);
-  return `#${r}${g}${b}`;
 }
 
 export function TimelinePreview({
-  fragments, subtitles, videoUrl,
+  fragments, subtitles,
   wordTimings, audioInfo, audioStart, audioEnd, onRangeChange,
   onSeek, currentTime, isPlaying, onPlayPause,
   displayMode = 'auto',
-  style,
 }: Props) {
   const [dragging, setDragging] = useState(false);
-  const [dragHandle, setDragHandle] = useState<'start' | 'end' | 'none'>('none');
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [dragHandle, setDragHandle] = useState<'start' | 'end' | 'move' | 'none'>('none');
+  const [dragStartX, setDragStartX] = useState(0);
+  const [dragStartRange, setDragStartRange] = useState({ start: 0, end: 0 });
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
   const duration = audioInfo?.duration || 0;
-
-  // Sync video to currentTime
-  useEffect(() => {
-    if (videoRef.current) {
-      const videoTime = currentTime - audioStart;
-      if (videoTime >= 0 && videoTime < (videoRef.current.duration || 9999)) {
-        // Only seek if difference is large (avoid stutter during normal playback)
-        if (Math.abs(videoRef.current.currentTime - videoTime) > 0.3) {
-          videoRef.current.currentTime = videoTime;
-        }
-      }
-    }
-  }, [currentTime, audioStart]);
 
   const handleSeek = (time: number) => {
     const clamped = Math.max(0, Math.min(duration, time));
@@ -90,6 +55,16 @@ export function TimelinePreview({
     setDragHandle(handle);
   };
 
+  // Move entire range
+  const handleRangeMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDragging(true);
+    setDragHandle('move');
+    setDragStartX(e.clientX);
+    setDragStartRange({ start: audioStart, end: audioEnd });
+  };
+
   useEffect(() => {
     if (!dragging) return;
     const handleMove = (e: MouseEvent) => {
@@ -99,8 +74,20 @@ export function TimelinePreview({
       const t = (x / rect.width) * duration;
       if (dragHandle === 'start') {
         onRangeChange(Math.max(0, Math.min(t, audioEnd - 1)), audioEnd);
-      } else {
+      } else if (dragHandle === 'end') {
         onRangeChange(audioStart, Math.min(duration, Math.max(t, audioStart + 1)));
+      } else if (dragHandle === 'move') {
+        // Move entire range — preserve width, shift by delta
+        const deltaX = e.clientX - dragStartX;
+        const deltaT = (deltaX / rect.width) * duration;
+        const rangeWidth = dragStartRange.end - dragStartRange.start;
+        let newStart = Math.max(0, Math.min(dragStartRange.start + deltaT, duration - rangeWidth));
+        let newEnd = newStart + rangeWidth;
+        if (newEnd > duration) {
+          newEnd = duration;
+          newStart = newEnd - rangeWidth;
+        }
+        onRangeChange(newStart, newEnd);
       }
     };
     const handleUp = () => { setDragging(false); setDragHandle('none'); };
@@ -140,106 +127,8 @@ export function TimelinePreview({
 
   return (
     <div className="space-y-2">
-      {/* ── Video Preview + Karaoke Overlay ── */}
-      <div className="flex gap-3">
-        {videoUrl && (
-          <div className="bg-black rounded-lg overflow-hidden relative shrink-0" style={{ aspectRatio: '9/16', height: '200px' }}>
-            <video ref={videoRef} src={videoUrl} className="h-full w-full object-contain" muted playsInline />
-            {/* Karaoke overlay — uses real SubtitleStyle */}
-            {currentSubs.length > 0 && (() => {
-              const textColor = style ? assToHex(style.primary_color) : '#ffffff';
-              const outlineW = style ? style.outline_width : 3;
-              const fontSize = style ? Math.max(12, Math.min(style.size / 4, 22)) : 14;
-              const fontFamily = style ? style.font : 'Arial';
-              const fontWeight = style?.bold ? '900' : 'bold';
-              const posStyle = style?.position === 'top' ? { top: '12%' }
-                : style?.position === 'center' ? { top: '45%' }
-                : { bottom: '8%' };
-
-              return (
-                <div className="absolute left-3 right-3 text-center pointer-events-none" style={posStyle}>
-                  {(() => {
-                    // ── Auto mode: choose ONE mode for entire track ──
-                    // Count long vs short lines across ALL subtitles
-                    let longLines = 0;
-                    let shortLines = 0;
-                    for (const sub of subtitles) {
-                      if (!sub.words) continue;
-                      const lineText = sub.words.map(w => w.word).join(' ');
-                      if (lineText.length > 30 || sub.words.length > 6) longLines++;
-                      else shortLines++;
-                    }
-                    const effectiveMode = displayMode === 'auto'
-                      ? (longLines > shortLines ? 'single_word' : 'line_highlight')
-                      : displayMode;
-
-                    if (effectiveMode === 'single_word') {
-                      return activeWord ? (
-                        <span
-                          style={{
-                            fontFamily, fontSize: `${fontSize + 6}px`, fontWeight,
-                            color: '#facc15',
-                            textShadow: `0 ${outlineW}px ${outlineW * 2}px rgba(0,0,0,0.95), 0 0 20px rgba(250,204,21,0.5)`,
-                          }}
-                        >
-                          {activeWord.word}
-                        </span>
-                      ) : null;
-                    }
-
-                    if (effectiveMode === 'word_by_word') {
-                      return activeWord ? (
-                        <span
-                          style={{
-                            fontFamily, fontSize: `${fontSize + 4}px`, fontWeight,
-                            color: '#facc15',
-                            textShadow: `0 ${outlineW}px ${outlineW * 2}px rgba(0,0,0,0.95), 0 0 20px rgba(250,204,21,0.5)`,
-                          }}
-                        >
-                          {activeWord.word}
-                        </span>
-                      ) : null;
-                    }
-
-                    // line_highlight
-                    return currentSubs.map(sub => (
-                      <div key={sub.id}>
-                        {sub.words && sub.words.length > 0 ? (
-                          sub.words.map((w, i) => {
-                            const isActive = videoTime >= w.start && videoTime <= w.end;
-                            const isPast = videoTime > w.end;
-                            return (
-                              <span
-                                key={i}
-                                style={{
-                                  fontFamily, fontSize: `${fontSize}px`, fontWeight,
-                                  color: isActive ? '#facc15' : isPast ? `${textColor}66` : textColor,
-                                  textShadow: `0 ${Math.max(2, outlineW)}px ${Math.max(4, outlineW * 2)}px rgba(0,0,0,0.9)`,
-                                  transition: 'color 0.15s, transform 0.15s',
-                                  display: 'inline-block',
-                                  transform: isActive ? 'scale(1.15)' : 'scale(1)',
-                                }}
-                              >
-                                {w.word}{' '}
-                              </span>
-                            );
-                          })
-                        ) : (
-                          <span style={{ fontFamily, fontSize: `${fontSize}px`, fontWeight, color: textColor, textShadow: `0 ${outlineW}px ${outlineW * 2}px rgba(0,0,0,0.9)` }}>
-                            {sub.text}
-                          </span>
-                        )}
-                      </div>
-                    ));
-                  })()}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* Side info panel */}
-        <div className="flex-1 space-y-1.5">
+      {/* Side info panel (no small video preview — use PreviewFrame in right column) */}
+      <div className="space-y-1.5">
           {/* Playback controls */}
           <div className="flex items-center gap-1.5">
             <button onClick={() => handleSeek(Math.max(0, currentTime - 5))} className="p-1.5 hover:bg-[#2a2a3a] rounded transition">
@@ -278,7 +167,6 @@ export function TimelinePreview({
             </div>
           </div>
         </div>
-      </div>
 
       {/* ── Timeline ── */}
       <div
@@ -300,9 +188,13 @@ export function TimelinePreview({
           <div key={i} className="absolute top-0 bottom-0 w-px bg-blue-500/15" style={{ left: `${duration > 0 ? (beat / duration) * 100 : 0}%` }} />
         ))}
 
-        {/* Audio selection range */}
-        <div className="absolute top-0 bottom-0 border-2 border-yellow-500/60 bg-yellow-500/10 pointer-events-none" style={{ left: `${startPct}%`, width: `${endPct - startPct}%` }}>
-          <span className="absolute top-0 left-1 text-[8px] text-yellow-400 font-mono whitespace-nowrap">{fmtTime(audioStart)}-{fmtTime(audioEnd)}</span>
+        {/* Audio selection range — draggable to move entire range */}
+        <div
+          className="absolute top-0 bottom-0 border-2 border-yellow-500/60 bg-yellow-500/10 cursor-grab active:cursor-grabbing z-10"
+          style={{ left: `${startPct}%`, width: `${endPct - startPct}%` }}
+          onMouseDown={handleRangeMouseDown}
+        >
+          <span className="absolute top-0 left-1 text-[8px] text-yellow-400 font-mono whitespace-nowrap pointer-events-none">{fmtTime(audioStart)}-{fmtTime(audioEnd)}</span>
         </div>
 
         {/* Start handle */}
@@ -333,7 +225,7 @@ export function TimelinePreview({
       </div>
 
       <div className="text-[10px] text-gray-600">
-        💡 Click timeline to seek · Drag yellow handles to select range · {displayMode === 'word_by_word' ? 'Word-by-word mode' : 'Line + highlight mode'}
+        💡 Click timeline to seek · Drag yellow handles to resize · Drag yellow area to move range · {displayMode === 'word_by_word' ? 'Word-by-word mode' : 'Line + highlight mode'}
       </div>
     </div>
   );

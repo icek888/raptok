@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Type, Mic, Sparkles, Scissors, Zap, Play, Pause, Plus, X } from 'lucide-react';
+import { Loader2, Type, Mic, Sparkles, Scissors, Play, Pause, Plus, X, Layout, Check } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle } from '../types';
+import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, RenderTemplate } from '../types';
 import { TimelinePreview } from './TimelinePreview';
+import { PreviewFrame } from './PreviewFrame';
 
 interface Props {
   lyrics: string;
@@ -20,6 +21,8 @@ interface Props {
   onAudioStartChange?: (start: number) => void;
   style: SubtitleStyle;
   onStyleChange: (style: SubtitleStyle) => void;
+  templateId?: string;
+  onTemplateChange?: (id: string) => void;
 }
 
 export function SubtitleEditor({
@@ -29,6 +32,7 @@ export function SubtitleEditor({
   displayMode, onDisplayModeChange,
   videoUrl, onAudioStartChange,
   style, onStyleChange,
+  templateId, onTemplateChange,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
@@ -37,11 +41,46 @@ export function SubtitleEditor({
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioStart, setAudioStart] = useState(0);
   const [audioEnd, setAudioEnd] = useState(0);
-  const [stretch, setStretch] = useState(1.0);
-  const [offset, setOffset] = useState(0.0);
-  const [adjusting, setAdjusting] = useState(false);
   const [showWordEditor, setShowWordEditor] = useState(false);
-  const [showSyncPanel, setShowSyncPanel] = useState(true);
+  // ── Template popup state ──
+  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
+  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
+  const [previewThumb, setPreviewThumb] = useState<string | null>(null);
+
+  // ── Load templates on mount ──
+  useEffect(() => {
+    api.getTemplates().then(data => setTemplates(data.templates)).catch(() => {});
+  }, []);
+
+  // ── Load first frame thumbnail for template previews ──
+  useEffect(() => {
+    if (fragments.length > 0 && videoUrl && !previewThumb) {
+      const firstFrag = fragments[0];
+      api.getThumbnails(videoUrl, [firstFrag.start])
+        .then(data => {
+          if (data.thumbnails?.[0]?.path) {
+            const filename = data.thumbnails[0].path.split('/').pop();
+            if (filename) setPreviewThumb(api.thumbnailUrl(filename));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [fragments, videoUrl]);
+
+  // ── Apply template to style ──
+  const applyTemplate = (tmpl: RenderTemplate) => {
+    onStyleChange({
+      ...style,
+      font: tmpl.font,
+      size: tmpl.size,
+      primary_color: tmpl.primary_color,
+      active_color: tmpl.active_color,
+      position: tmpl.position as 'bottom' | 'center' | 'top',
+    });
+    onDisplayModeChange(tmpl.display_mode as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word');
+    onTemplateChange?.(tmpl.id);
+    setShowTemplatePopup(false);
+  };
 
   // ── Full-track word timings (absolute timestamps from whisper) ──
   // Once transcribed, we filter these by audioStart/audioEnd locally
@@ -124,10 +163,6 @@ export function SubtitleEditor({
         lyrics || result.text, fragments, filtered, 0,
       );
       onSubtitlesChange(subResult.subtitles);
-      
-      // Reset stretch/offset since we have fresh timings
-      setStretch(1.0);
-      setOffset(0.0);
     } catch (e) {
       console.error('Transcribe failed:', e);
     } finally {
@@ -185,28 +220,6 @@ export function SubtitleEditor({
     }
   };
 
-  // ── Apply stretch + offset ──
-  const handleAdjust = async () => {
-    if (wordTimings.length === 0) return;
-    setAdjusting(true);
-    try {
-      const result = await api.adjustSubtitles(
-        lyrics || '', fragments, wordTimings, stretch, offset,
-      );
-      onWordTimingsChange(result.words);
-      onSubtitlesChange(result.subtitles);
-    } catch (e) {
-      console.error('Adjust failed:', e);
-    } finally {
-      setAdjusting(false);
-    }
-  };
-
-  // ── Quick stretch presets ──
-  const applyStretch = (factor: number) => {
-    setStretch(factor);
-  };
-
   // ── Per-word edit (with live subtitle regen) ──
   const updateWordTiming = (idx: number, field: 'start' | 'end' | 'word', value: string | number) => {
     const updated = wordTimings.map((w, i) =>
@@ -256,13 +269,416 @@ export function SubtitleEditor({
     playTime - audioStart >= w.start && playTime - audioStart <= w.end
   );
 
-  return (
-    <div className="space-y-4">
-      {/* Hidden audio element for playback */}
-      {audioUrl && (
-        <audio ref={audioRef} src={audioUrl} preload="metadata" />
+  // ── LEFT COLUMN: Style Controls Panel ──
+  const stylePanel = (
+    <div className="space-y-3">
+      {/* Templates button + popup */}
+      {templates.length > 0 && (
+        <>
+          <button
+            onClick={() => setShowTemplatePopup(true)}
+            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
+              templateId
+                ? 'bg-purple-600/20 border border-purple-500/40 text-purple-300'
+                : 'bg-gradient-to-r from-purple-600/10 to-pink-600/10 border border-purple-500/20 text-gray-300 hover:border-purple-500/40'
+            }`}
+          >
+            <Layout size={14} />
+            {templateId ? `Template: ${templates.find(t => t.id === templateId)?.name || 'Selected'}` : 'Choose Template'}
+          </button>
+
+          {/* Template Popup Modal */}
+          {showTemplatePopup && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+              onClick={() => setShowTemplatePopup(false)}
+            >
+              <div
+                className="bg-[#0f0f17] border border-[#2a2a3a] rounded-2xl p-5 max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-bold text-white">Render Templates</h3>
+                  <button
+                    onClick={() => setShowTemplatePopup(false)}
+                    className="text-gray-500 hover:text-gray-300"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  {templates.map(tmpl => {
+                    const isSelected = templateId === tmpl.id;
+                    // Convert ASS BGR color to CSS RGB for preview
+                    const assToCss = (c: string) => {
+                      const hex = c.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+                      if (hex.length < 6) return '#ffffff';
+                      return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
+                    };
+                    const activeCss = assToCss(tmpl.active_color);
+                    const primaryCss = assToCss(tmpl.primary_color);
+                    // CSS filter per video_mode
+                    let bgFilter = 'none';
+                    let imgClass = 'absolute inset-0 w-full h-full object-cover';
+                    if (tmpl.video_mode === 'crop_fill') {
+                      bgFilter = 'none';
+                      imgClass = 'absolute inset-0 w-full h-full object-cover';
+                    } else if (tmpl.video_mode === 'fit_blur_dark') {
+                      bgFilter = `blur(${Math.round(tmpl.blur_sigma / 3)}px) brightness(${1 - tmpl.dark_overlay * 0.5}) contrast(0.8)`;
+                    } else {
+                      bgFilter = `blur(${Math.round(tmpl.blur_sigma / 3)}px)`;
+                    }
+                    // Scale transform for "floating" look
+                    const scaleStyle = tmpl.scale_factor < 1.0
+                      ? { transform: `scale(${tmpl.scale_factor})` }
+                      : {};
+
+                    return (
+                      <button
+                        key={tmpl.id}
+                        onClick={() => applyTemplate(tmpl)}
+                        className={`relative rounded-xl overflow-hidden border-2 transition group ${
+                          isSelected ? 'border-purple-500' : 'border-[#2a2a3a] hover:border-purple-500/50'
+                        }`}
+                      >
+                        {/* Preview thumbnail (9:16 mini) with real video frame */}
+                        <div
+                          className="relative aspect-[9/16] flex items-center justify-center overflow-hidden"
+                          style={{ background: '#0a0a0f' }}
+                        >
+                          {previewThumb ? (
+                            <>
+                              {tmpl.video_mode === 'crop_fill' ? (
+                                /* crop_fill: full screen zoomed video, no blur */
+                                <img
+                                  src={previewThumb}
+                                  alt=""
+                                  className={imgClass}
+                                  style={{ filter: bgFilter, ...scaleStyle }}
+                                />
+                              ) : (
+                                /* fit_blur / fit_blur_dark: blurred bg + clear centered video */
+                                <>
+                                  <img
+                                    src={previewThumb}
+                                    alt=""
+                                    className="absolute inset-0 w-full h-full object-cover"
+                                    style={{ filter: bgFilter }}
+                                  />
+                                  <img
+                                    src={previewThumb}
+                                    alt=""
+                                    className="absolute inset-0 w-full h-full object-contain"
+                                    style={{ ...scaleStyle, zIndex: 2 }}
+                                  />
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <div
+                              className="absolute inset-0"
+                              style={{
+                                background: `radial-gradient(circle at 50% 40%, rgba(100,60,200,0.3), transparent 70%)`,
+                                filter: `blur(${Math.round(tmpl.blur_sigma / 3)}px)`,
+                              }}
+                            />
+                          )}
+                          {/* Dark overlay */}
+                          {tmpl.dark_overlay > 0 && (
+                            <div
+                              className="absolute inset-0 bg-black"
+                              style={{ opacity: tmpl.dark_overlay }}
+                            />
+                          )}
+                          {/* Sample text — positioned like the real render */}
+                          <div
+                            className={`relative z-10 text-center px-2 ${tmpl.position === 'bottom' ? 'absolute bottom-4 left-0 right-0' : ''} ${tmpl.position === 'top' ? 'absolute top-4 left-0 right-0' : ''}`}
+                          >
+                            <span
+                              style={{
+                                fontFamily: `'${tmpl.font}', sans-serif`,
+                                fontSize: `${Math.max(10, tmpl.size / 5)}px`,
+                                color: primaryCss,
+                                textShadow: `0 0 ${tmpl.blur_sigma > 30 ? '8px' : '4px'} ${activeCss}, 0 2px 4px rgba(0,0,0,0.8)`,
+                                fontWeight: 'bold',
+                                display: 'block',
+                                lineHeight: '1.2',
+                              }}
+                            >
+                              Где то там
+                            </span>
+                            <span
+                              style={{
+                                fontFamily: `'${tmpl.font}', sans-serif`,
+                                fontSize: `${Math.max(12, tmpl.size / 4)}px`,
+                                color: activeCss,
+                                textShadow: `0 0 6px ${activeCss}, 0 2px 4px rgba(0,0,0,0.8)`,
+                                fontWeight: 'bold',
+                                display: 'block',
+                                lineHeight: '1.2',
+                                marginTop: '2px',
+                              }}
+                            >
+                              ангелы
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Template info */}
+                        <div className="p-2 bg-[#0a0a0f]">
+                          <div className="text-xs font-bold text-white flex items-center gap-1">
+                            {isSelected && <Check size={12} className="text-purple-400" />}
+                            {tmpl.name}
+                          </div>
+                          <div className="text-[9px] text-gray-500 leading-tight mt-0.5">{tmpl.description}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Clear template button */}
+                {templateId && (
+                  <button
+                    onClick={() => {
+                      onTemplateChange?.('');
+                      setShowTemplatePopup(false);
+                    }}
+                    className="mt-4 w-full py-2 text-xs text-gray-500 hover:text-gray-300 border border-[#2a2a3a] rounded-lg"
+                  >
+                    ✕ Clear template — use custom style
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
+      {/* Style Controls — always visible (not collapsible) */}
+      <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-3 space-y-2.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-pink-300">🎨 Style Controls</span>
+          <span className="text-[10px] text-gray-500 ml-auto">
+            {style.font} · {style.position} · {style.size}px
+          </span>
+        </div>
+
+        {/* Font selector */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Font</label>
+          <select
+            value={style.font}
+            onChange={e => onStyleChange({ ...style, font: e.target.value })}
+            className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1.5 text-xs text-gray-200"
+          >
+            {['Arial', 'Montserrat', 'Oswald', 'Russo One', 'Pacifico', 'Press Start 2P'].map(f =>
+              <option key={f} value={f}>{f}</option>
+            )}
+          </select>
+        </div>
+
+        {/* Position */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Position</label>
+          <select
+            value={style.position}
+            onChange={e => onStyleChange({ ...style, position: e.target.value as 'bottom' | 'center' | 'top' })}
+            className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1.5 text-xs text-gray-200"
+          >
+            <option value="bottom">↓ Bottom</option>
+            <option value="center">↕ Center</option>
+            <option value="top">↑ Top</option>
+          </select>
+        </div>
+
+        {/* Size */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Size</label>
+            <span className="text-pink-300 font-mono text-xs">{style.size}px</span>
+          </div>
+          <input
+            type="range" min="36" max="120"
+            value={style.size}
+            onChange={e => onStyleChange({ ...style, size: parseInt(e.target.value) })}
+            className="w-full accent-pink-500"
+          />
+        </div>
+
+        {/* Margin */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Margin V</label>
+            <span className="text-pink-300 font-mono text-xs">{style.margin_v}px</span>
+          </div>
+          <input
+            type="range" min="0" max="400"
+            value={style.margin_v}
+            onChange={e => onStyleChange({ ...style, margin_v: parseInt(e.target.value) })}
+            className="w-full accent-pink-500"
+          />
+        </div>
+
+        {/* Outline Width */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Outline</label>
+            <span className="text-pink-300 font-mono text-xs">{style.outline_width}</span>
+          </div>
+          <input
+            type="range" min="0" max="10"
+            value={style.outline_width}
+            onChange={e => onStyleChange({ ...style, outline_width: parseInt(e.target.value) })}
+            className="w-full accent-pink-500"
+          />
+        </div>
+
+        {/* Colors */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Colors</label>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <input
+                type="color"
+                value={(() => {
+                  const hex = style.active_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+                  if (hex.length < 8) return '#facc15';
+                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
+                })()}
+                onChange={e => {
+                  const r = e.target.value.substring(1, 3);
+                  const g = e.target.value.substring(3, 5);
+                  const b = e.target.value.substring(5, 7);
+                  onStyleChange({ ...style, active_color: `&H00${b}${g}${r}` });
+                }}
+                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
+                title="Active word color"
+              />
+              <span className="text-[10px] text-gray-500">Active</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="color"
+                value={(() => {
+                  const hex = style.primary_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+                  if (hex.length < 8) return '#ffffff';
+                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
+                })()}
+                onChange={e => {
+                  const r = e.target.value.substring(1, 3);
+                  const g = e.target.value.substring(3, 5);
+                  const b = e.target.value.substring(5, 7);
+                  onStyleChange({ ...style, primary_color: `&H00${b}${g}${r}` });
+                }}
+                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
+                title="Text color"
+              />
+              <span className="text-[10px] text-gray-500">Text</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="color"
+                value={(() => {
+                  const hex = style.outline_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+                  if (hex.length < 8) return '#000000';
+                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
+                })()}
+                onChange={e => {
+                  const r = e.target.value.substring(1, 3);
+                  const g = e.target.value.substring(3, 5);
+                  const b = e.target.value.substring(5, 7);
+                  onStyleChange({ ...style, outline_color: `&H00${b}${g}${r}` });
+                }}
+                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
+                title="Outline color"
+              />
+              <span className="text-[10px] text-gray-500">Outline</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Bold toggle */}
+        <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={style.bold}
+            onChange={e => onStyleChange({ ...style, bold: e.target.checked })}
+            className="w-3.5 h-3.5 accent-pink-500"
+          />
+          Bold
+        </label>
+      </div>
+
+      {/* Display Mode + Karaoke toggle */}
+      <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3 space-y-2.5">
+        {/* Karaoke toggle */}
+        <button
+          onClick={() => onKaraokeChange(!karaoke)}
+          className={`flex items-center gap-1.5 w-full px-3 py-2 rounded-lg text-sm transition ${
+            karaoke ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'
+          }`}
+        >
+          <Sparkles size={14} />
+          Karaoke {karaoke ? 'ON' : 'OFF'}
+        </button>
+
+        {/* Display mode buttons */}
+        {karaoke && (
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Display Mode</label>
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                onClick={() => onDisplayModeChange('auto')}
+                className={`px-2 py-1.5 text-xs rounded transition ${
+                  displayMode === 'auto'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                🤖 Auto
+              </button>
+              <button
+                onClick={() => onDisplayModeChange('line_highlight')}
+                className={`px-2 py-1.5 text-xs rounded transition ${
+                  displayMode === 'line_highlight'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                📝 Line
+              </button>
+              <button
+                onClick={() => onDisplayModeChange('word_by_word')}
+                className={`px-2 py-1.5 text-xs rounded transition ${
+                  displayMode === 'word_by_word'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                ✨ Word
+              </button>
+              <button
+                onClick={() => onDisplayModeChange('single_word')}
+                className={`px-2 py-1.5 text-xs rounded transition ${
+                  displayMode === 'single_word'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                🔤 Single
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── CENTER COLUMN: Main editing content ──
+  const centerContent = (
+    <div className="space-y-4 min-w-0">
       {/* ── Top: Unified Timeline + Audio Player ── */}
       {audioPath && audioInfo && (
         <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3 space-y-2">
@@ -300,7 +716,6 @@ export function SubtitleEditor({
             isPlaying={isPlaying}
             onPlayPause={togglePlay}
             displayMode={displayMode}
-            style={style}
           />
         </div>
       )}
@@ -335,7 +750,7 @@ export function SubtitleEditor({
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-gray-500">
                   Start: <input
-                    type="number" step={0.1} min={0} max={audioInfo.duration}
+                    type="number" step="0.1" min="0" max={audioInfo.duration}
                     value={audioStart}
                     onChange={e => setAudioStart(Math.min(parseFloat(e.target.value) || 0, audioEnd - 1))}
                     className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-blue-400 font-mono"
@@ -343,7 +758,7 @@ export function SubtitleEditor({
                 </span>
                 <span className="text-gray-500">
                   End: <input
-                    type="number" step={0.1} min={0} max={audioInfo.duration}
+                    type="number" step="0.1" min="0" max={audioInfo.duration}
                     value={audioEnd}
                     onChange={e => setAudioEnd(Math.max(parseFloat(e.target.value) || audioInfo.duration, audioStart + 1))}
                     className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-blue-400 font-mono"
@@ -396,224 +811,8 @@ export function SubtitleEditor({
         </div>
       )}
 
-      {/* ── Sync Controls (collapsible) ── */}
-      {wordTimings.length > 0 && (
-        <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl p-3 space-y-2">
-          <button
-            onClick={() => setShowSyncPanel(!showSyncPanel)}
-            className="flex items-center gap-2 w-full"
-          >
-            <Zap size={14} className="text-orange-400" />
-            <span className="text-sm font-medium text-orange-300">Sync Adjustment</span>
-            <span className="text-xs text-gray-500 ml-auto">
-              {wordTimings.length} words · {wordTimings[0]?.start.toFixed(1)}s → {wordTimings[wordTimings.length - 1]?.end.toFixed(1)}s
-            </span>
-          </button>
-          {showSyncPanel && (
-            <div className="space-y-2 pt-1">
-              {/* Speed buttons */}
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-gray-500 w-12">Speed:</span>
-                <div className="flex gap-1 flex-1">
-                  {[
-                    { v: 0.5, l: '½x' },
-                    { v: 0.75, l: '¾x' },
-                    { v: 1.0, l: '1x' },
-                    { v: 1.25, l: '1¼x' },
-                    { v: 1.5, l: '1½x' },
-                    { v: 2.0, l: '2x' },
-                  ].map(b => (
-                    <button
-                      key={b.v}
-                      onClick={() => applyStretch(b.v)}
-                      className={`flex-1 py-1 text-xs rounded transition ${
-                        stretch === b.v
-                          ? 'bg-orange-600 text-white'
-                          : 'bg-orange-500/20 hover:bg-orange-500/30 text-orange-300'
-                      }`}
-                    >
-                      {b.l}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Fine speed slider */}
-              <input
-                type="range" min={0.25} max={3.0} step={0.05}
-                value={stretch}
-                onChange={e => setStretch(parseFloat(e.target.value))}
-                className="w-full accent-orange-500"
-              />
-              {/* Offset */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500 w-12">Offset:</span>
-                <input
-                  type="range" min={-10} max={10} step={0.1}
-                  value={offset}
-                  onChange={e => setOffset(parseFloat(e.target.value))}
-                  className="flex-1 accent-orange-500"
-                />
-                <input
-                  type="number" step={0.1}
-                  value={offset}
-                  onChange={e => setOffset(parseFloat(e.target.value) || 0)}
-                  className="w-16 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-1 text-xs text-orange-400 font-mono text-right"
-                />
-              </div>
-              <button
-                onClick={handleAdjust}
-                disabled={adjusting || (stretch === 1.0 && offset === 0)}
-                className="w-full py-1.5 bg-orange-600 hover:bg-orange-500 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition disabled:opacity-40"
-              >
-                {adjusting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-                Apply Sync ({stretch.toFixed(2)}x, {offset > 0 ? '+' : ''}{offset.toFixed(1)}s)
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Quick Style Controls ── */}
-      <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-2.5 space-y-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-pink-300">🎨 Style</span>
-          <select
-            value={style.font}
-            onChange={e => onStyleChange({ ...style, font: e.target.value })}
-            className="bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1.5 py-1 text-xs text-gray-200"
-          >
-            {['Arial', 'Helvetica', 'Impact', 'Georgia', 'Verdana', 'Courier New'].map(f =>
-              <option key={f} value={f}>{f}</option>
-            )}
-          </select>
-          <select
-            value={style.position}
-            onChange={e => onStyleChange({ ...style, position: e.target.value as 'bottom' | 'center' | 'top' })}
-            className="bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1.5 py-1 text-xs text-gray-200"
-          >
-            <option value="bottom">↓ Bottom</option>
-            <option value="center">↕ Center</option>
-            <option value="top">↑ Top</option>
-          </select>
-          <label className="flex items-center gap-1 text-xs text-gray-400">
-            Size
-            <input
-              type="range" min="36" max="120"
-              value={style.size}
-              onChange={e => onStyleChange({ ...style, size: parseInt(e.target.value) })}
-              className="w-16 accent-pink-500"
-            />
-            <span className="text-pink-300 font-mono w-7">{style.size}</span>
-          </label>
-          <label className="flex items-center gap-1 text-xs text-gray-400">
-            Outline
-            <input
-              type="range" min="0" max="8"
-              value={style.outline_width}
-              onChange={e => onStyleChange({ ...style, outline_width: parseInt(e.target.value) })}
-              className="w-12 accent-pink-500"
-            />
-            <span className="text-pink-300 font-mono w-4">{style.outline_width}</span>
-          </label>
-          <input
-            type="color"
-            value={(() => {
-              const hex = style.primary_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-              if (hex.length < 8) return '#ffffff';
-              return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-            })()}
-            onChange={e => {
-              const r = e.target.value.substring(1, 3);
-              const g = e.target.value.substring(3, 5);
-              const b = e.target.value.substring(5, 7);
-              onStyleChange({ ...style, primary_color: `&H00${b}${g}${r}` });
-            }}
-            className="w-6 h-6 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
-            title="Text color"
-          />
-          <input
-            type="color"
-            value={(() => {
-              const hex = style.outline_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-              if (hex.length < 8) return '#000000';
-              return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-            })()}
-            onChange={e => {
-              const r = e.target.value.substring(1, 3);
-              const g = e.target.value.substring(3, 5);
-              const b = e.target.value.substring(5, 7);
-              onStyleChange({ ...style, outline_color: `&H00${b}${g}${r}` });
-            }}
-            className="w-6 h-6 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
-            title="Outline color"
-          />
-          <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={style.bold}
-              onChange={e => onStyleChange({ ...style, bold: e.target.checked })}
-              className="w-3 h-3 accent-pink-500"
-            />
-            Bold
-          </label>
-        </div>
-      </div>
-
-      {/* ── Karaoke toggle + Display mode + Split ── */}
+      {/* ── Word Split + Edit Words toolbar ── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => onKaraokeChange(!karaoke)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition ${
-            karaoke ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'
-          }`}
-        >
-          <Sparkles size={14} />
-          Karaoke
-        </button>
-        {karaoke && (
-          <div className="flex items-center gap-1 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg p-0.5">
-            <button
-              onClick={() => onDisplayModeChange('auto')}
-              className={`px-2.5 py-1.5 text-xs rounded transition ${
-                displayMode === 'auto'
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              🤖 Auto
-            </button>
-            <button
-              onClick={() => onDisplayModeChange('line_highlight')}
-              className={`px-2.5 py-1.5 text-xs rounded transition ${
-                displayMode === 'line_highlight'
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              📝 Line
-            </button>
-            <button
-              onClick={() => onDisplayModeChange('word_by_word')}
-              className={`px-2.5 py-1.5 text-xs rounded transition ${
-                displayMode === 'word_by_word'
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              ✨ Word
-            </button>
-            <button
-              onClick={() => onDisplayModeChange('single_word')}
-              className={`px-2.5 py-1.5 text-xs rounded transition ${
-                displayMode === 'single_word'
-                  ? 'bg-purple-600 text-white'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-            >
-              🔤 Single
-            </button>
-          </div>
-        )}
         <button
           onClick={handleWordSplit}
           disabled={wordSplitLoading || fragments.length === 0}
@@ -769,6 +968,48 @@ export function SubtitleEditor({
             : 'Upload audio → paste lyrics → Transcribe & Align (full track)'}
         </div>
       )}
+    </div>
+  );
+
+  // ── RIGHT COLUMN: Large video preview ──
+  const rightColumn = (
+    <PreviewFrame
+      videoUrl={videoUrl}
+      subtitles={subtitles}
+      wordTimings={wordTimings}
+      displayMode={displayMode}
+      style={style}
+      audioStart={audioStart}
+      currentTime={playTime}
+      isPlaying={isPlaying}
+      onPlayPause={togglePlay}
+    />
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Hidden audio element for playback */}
+      {audioUrl && (
+        <audio ref={audioRef} src={audioUrl} preload="metadata" />
+      )}
+
+      {/* ── 3-column desktop layout (≥1024px) / single column mobile (<1024px) ── */}
+      <div className="flex flex-col lg:flex-row gap-5">
+        {/* LEFT: Style controls + display mode + karaoke (~260px) */}
+        <div className="lg:w-[260px] lg:shrink-0">
+          {stylePanel}
+        </div>
+
+        {/* CENTER: Audio + timeline + transcribe + sync + subtitles (flex-1) */}
+        <div className="flex-1 min-w-0">
+          {centerContent}
+        </div>
+
+        {/* RIGHT: Large 9:16 video preview (~380px) */}
+        <div className="lg:w-[380px] lg:shrink-0">
+          {rightColumn}
+        </div>
+      </div>
     </div>
   );
 }
