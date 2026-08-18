@@ -36,6 +36,7 @@ export function SubtitleEditor({
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
+  const [whisperModel, setWhisperModel] = useState('small');
   const [wordSplitLoading, setWordSplitLoading] = useState(false);
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
@@ -148,7 +149,7 @@ export function SubtitleEditor({
     setTranscribing(true);
     try {
       // Transcribe the FULL audio track (not just the fragment)
-      const result = await api.transcribeFull(audioPath, transcribeLang, lyrics);
+      const result = await api.transcribeFull(audioPath, transcribeLang, lyrics, whisperModel);
       
       // Store absolute word timings for the entire track
       setFullTrackWords(result.words);
@@ -787,9 +788,19 @@ export function SubtitleEditor({
               onChange={e => setTranscribeLang(e.target.value)}
               className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-2 py-1.5 text-xs text-gray-200"
             >
-              <option value="ru">🇷🇺 Russian</option>
-              <option value="en">🇬🇧 English</option>
+              <option value="ru">🇷🇺 RU</option>
+              <option value="en">🇬🇧 EN</option>
               <option value="auto">🌍 Auto</option>
+            </select>
+            <select
+              value={whisperModel}
+              onChange={e => setWhisperModel(e.target.value)}
+              className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-2 py-1.5 text-xs text-gray-200"
+              title="WhisperX model size — bigger = more accurate but slower"
+            >
+              <option value="small">⚡ small (~48s)</option>
+              <option value="medium">🔷 medium (~103s)</option>
+              <option value="large-v3">🧠 large-v3 (~160s)</option>
             </select>
             <button
               onClick={handleTranscribe}

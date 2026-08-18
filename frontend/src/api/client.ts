@@ -167,11 +167,13 @@ export const api = {
     audioPath: string,
     language: string = 'en',
     lyrics?: string,
+    modelSize: string = '',
   ): Promise<TranscribeResult & { total_duration?: number; bpm?: number }> => {
     const form = new FormData();
     form.append('audio_path', audioPath);
     form.append('language', language);
     if (lyrics) form.append('lyrics', lyrics);
+    if (modelSize) form.append('model_size', modelSize);
     return postForm(`${API_BASE}/transcribe-full`, form);
   },
 

@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Cache model instances (loaded on first use)
 _whisperx_model = None
+_whisperx_model_size = None
 _align_model = None
 _align_language = None
 _model_size = os.getenv("RAPTOK_WHISPER_MODEL", "small")
@@ -19,18 +20,20 @@ _device = os.getenv("RAPTOK_WHISPER_DEVICE", "cpu")
 _compute_type = "int8" if _device == "cpu" else "float16"
 
 
-def _get_whisperx_model():
-    """Load WhisperX model (faster-whisper backend)."""
-    global _whisperx_model
-    if _whisperx_model is None:
+def _get_whisperx_model(model_size: str = ""):
+    """Load WhisperX model (faster-whisper backend). Caches per model_size."""
+    global _whisperx_model, _whisperx_model_size
+    size = model_size or _model_size
+    if _whisperx_model is None or _whisperx_model_size != size:
         import whisperx
-        logger.info(f"Loading WhisperX model: {_model_size} on {_device}")
+        logger.info(f"Loading WhisperX model: {size} on {_device}")
         _whisperx_model = whisperx.load_model(
-            _model_size,
+            size,
             device=_device,
             compute_type=_compute_type,
-            language="ru",  # hint for alignment model selection
+            language="ru",
         )
+        _whisperx_model_size = size
     return _whisperx_model
 
 
@@ -53,50 +56,52 @@ def transcribe_audio(
     language: str = "en",
     word_timestamps: bool = True,
     lyrics: str = "",
+    model_size: str = "",
 ) -> dict:
     """
     Transcribe audio using WhisperX and return word-level timestamps.
     
-    WhisperX pipeline:
-    1. faster-whisper transcription (base/small/medium)
-    2. wav2vec2 forced alignment for precise word timestamps
-    3. Optional VAD preprocessing (disabled for music — VAD cuts singing)
-    
-    If lyrics are provided, they are used as the transcript instead of
-    Whisper's output, and wav2vec2 alignment is performed directly on
-    the user-provided lyrics — this gives the best results because
-    Whisper doesn't need to guess the words.
+    Args:
+        audio_path: Path to audio file
+        language: Language code (en, ru, auto)
+        word_timestamps: Always True (WhisperX always returns word timestamps)
+        lyrics: Optional lyrics text — first 2 lines used as initial_prompt for better accuracy
+        model_size: Override model size (small, medium, large-v3). If empty, uses default.
     
     Returns:
         {
             "text": str,
             "segments": [...],
-            "words": [
-                {"word": str, "start": float, "end": float, "probability": float}
-            ],
+            "words": [{"word": str, "start": float, "end": float, "probability": float}],
             "language": str,
         }
     """
     import whisperx
     
-    model = _get_whisperx_model()
+    model = _get_whisperx_model(model_size)
     
     # Detect language code
     lang_detected = language if language != "auto" else "ru"
     
-    # Always transcribe with whisper first — gives rough word timestamps
-    # If user provides lyrics, we'll map them via DTW after alignment
-    logger.info(f"WhisperX transcribing: {audio_path}")
+    # Build initial_prompt from first 2 lines of lyrics (helps model understand context)
+    initial_prompt = ""
+    if lyrics:
+        lines = [l.strip() for l in lyrics.strip().split("\n") if l.strip()]
+        if lines:
+            initial_prompt = ". ".join(lines[:2])
+            logger.info(f"Using initial_prompt: {initial_prompt[:80]}...")
+    
+    # Transcribe
+    logger.info(f"WhisperX transcribing ({model_size or _model_size}): {audio_path}")
     transcript = model.transcribe(
         audio_path,
         language=language if language != "auto" else None,
-        batch_size=8 if _device != "cpu" else 4,
+        batch_size=16 if _device != "cpu" else 8,
     )
     if language == "auto":
         lang_detected = transcript.get("language", "ru")
     
     # Step 2: Forced alignment with wav2vec2
-    # This gives us precise word-level timestamps (<100ms accuracy)
     lang_detected = language if language != "auto" else transcript.get("language", "ru")
     
     try:
@@ -129,7 +134,6 @@ def transcribe_audio(
         
         seg_words = seg.get("words", [])
         for w in seg_words:
-            # WhisperX word format: {"word": "...", "start": ..., "end": ..., "score": ...}
             word_data = {
                 "word": w.get("word", "").strip(),
                 "start": round(w.get("start", 0), 3),

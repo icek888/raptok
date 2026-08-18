@@ -404,6 +404,7 @@ async def api_transcribe_full(
     audio_path: str = Form(...),
     language: str = Form("en"),
     lyrics: str = Form(""),
+    model_size: str = Form(""),
 ):
     """Transcribe ENTIRE audio track once. Returns absolute word timestamps.
     
@@ -430,7 +431,7 @@ async def api_transcribe_full(
         # ── Step 2: WhisperX transcribe + align (wav2vec2 built-in) ──
         # If user provided lyrics, WhisperX aligns them directly (no whisper transcription needed)
         # If no lyrics, WhisperX transcribes and aligns in one step
-        whisper_result = transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics)
+        whisper_result = transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size)
         
         user_lyrics = lyrics.strip() if lyrics else ""
         
