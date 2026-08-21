@@ -5,6 +5,13 @@ import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, Rend
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
 
+// Colors for word chips — cycle through lines
+const WORD_COLORS = [
+  '#3b82f6', '#a855f7', '#ec4899', '#f59e0b',
+  '#10b981', '#06b6d4', '#ef4444', '#8b5cf6',
+  '#f97316', '#14b8a6', '#eab308', '#6366f1',
+];
+
 interface Props {
   lyrics: string;
   fragments: Fragment[];
@@ -43,6 +50,7 @@ export function SubtitleEditor({
   const [audioStart, setAudioStart] = useState(0);
   const [audioEnd, setAudioEnd] = useState(0);
   const [showWordEditor, setShowWordEditor] = useState(false);
+  const [selectedWordIdx, setSelectedWordIdx] = useState(-1);
   // ── Template popup state ──
   const [templates, setTemplates] = useState<RenderTemplate[]>([]);
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
@@ -848,60 +856,218 @@ export function SubtitleEditor({
         </span>
       </div>
 
-      {/* ── Word Timing Editor (collapsible) ── */}
+      {/* ── Word Editor: Left (word chips by line) + Right (edit panel) ── */}
       {showWordEditor && wordTimings.length > 0 && (
-        <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3 space-y-1">
-          <div className="max-h-[250px] overflow-y-auto pr-2 space-y-0.5">
-            {wordTimings.map((w, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-1 text-xs rounded px-1 py-0.5 transition ${
-                  i === activeWordIndex ? 'bg-yellow-500/20' : ''
-                }`}
-              >
-                <span className="text-gray-600 w-5 text-right font-mono">{i + 1}</span>
-                <input
-                  type="text"
-                  value={w.word}
-                  onChange={e => updateWordTiming(i, 'word', e.target.value)}
-                  className="w-20 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1.5 py-1 text-gray-200"
-                />
-                <input
-                  type="number" step={0.01}
-                  value={w.start}
-                  onChange={e => updateWordTiming(i, 'start', parseFloat(e.target.value) || 0)}
-                  className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-1 text-blue-400 font-mono"
-                />
-                <span className="text-gray-600">→</span>
-                <input
-                  type="number" step={0.01}
-                  value={w.end}
-                  onChange={e => updateWordTiming(i, 'end', parseFloat(e.target.value) || 0)}
-                  className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-1 text-blue-400 font-mono"
-                />
-                <button
-                  onClick={() => seekTo(w.start + audioStart)}
-                  className="px-1 py-1 text-purple-400 hover:bg-purple-500/10 rounded"
-                  title="Play from here"
-                >
-                  <Play size={10} />
-                </button>
-                <button
-                  onClick={() => insertWord(i)}
-                  className="px-1 py-1 text-green-400 hover:bg-green-500/10 rounded"
-                  title="Insert before"
-                >
-                  <Plus size={10} />
-                </button>
-                <button
-                  onClick={() => deleteWord(i)}
-                  className="px-1 py-1 text-red-400 hover:bg-red-500/10 rounded"
-                  title="Delete"
-                >
-                  <X size={10} />
-                </button>
+        <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3">
+          <div className="flex gap-3" style={{ minHeight: 220, maxHeight: 320 }}>
+            {/* LEFT: Word chips grouped by subtitle lines */}
+            <div className="flex-1 min-w-0 overflow-y-auto pr-2 space-y-1.5">
+              <div className="text-[10px] text-gray-500 mb-1 flex items-center gap-2">
+                <span>📝 Words by line</span>
+                <span className="text-gray-700">· click to edit</span>
               </div>
-            ))}
+              {subtitles.length > 0 ? (
+                subtitles.map((sub, lineIdx) => {
+                  const lineColor = WORD_COLORS[lineIdx % WORD_COLORS.length];
+                  const lineWords = wordTimings.filter(w => w.start >= sub.start - 0.01 && w.end <= sub.end + 0.01);
+                  if (lineWords.length === 0) return null;
+                  return (
+                    <div key={sub.id} className="flex flex-wrap gap-1 items-center">
+                      <span className="text-[9px] text-gray-600 font-mono mr-1">#{sub.id + 1}</span>
+                      {lineWords.map(w => {
+                        const wordIdx = wordTimings.indexOf(w);
+                        const isActive = wordIdx === activeWordIndex;
+                        const isSelected = wordIdx === selectedWordIdx;
+                        return (
+                          <button
+                            key={wordIdx}
+                            onClick={() => { setSelectedWordIdx(wordIdx); seekTo(w.start + audioStart); }}
+                            className={`px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                              isSelected
+                                ? 'ring-2 ring-yellow-400 text-white scale-105'
+                                : isActive
+                                ? 'bg-yellow-500/30 text-yellow-200 ring-1 ring-yellow-500/50'
+                                : 'hover:scale-105'
+                            }`}
+                            style={
+                              isSelected || isActive
+                                ? undefined
+                                : {
+                                    backgroundColor: `${lineColor}25`,
+                                    color: lineColor,
+                                    border: `1px solid ${lineColor}40`,
+                                  }
+                            }
+                            title={`${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s${w.probability ? ` · p=${w.probability.toFixed(2)}` : ''}`}
+                          >
+                            {w.word}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              ) : (
+                // No subtitles yet — show all words in one row
+                <div className="flex flex-wrap gap-1">
+                  {wordTimings.map((w, i) => {
+                    const isActive = i === activeWordIndex;
+                    const isSelected = i === selectedWordIdx;
+                    const color = WORD_COLORS[i % WORD_COLORS.length];
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => { setSelectedWordIdx(i); seekTo(w.start + audioStart); }}
+                        className={`px-2 py-1 rounded-md text-xs font-medium transition-all ${
+                          isSelected
+                            ? 'ring-2 ring-yellow-400 text-white scale-105'
+                            : isActive
+                            ? 'bg-yellow-500/30 text-yellow-200 ring-1 ring-yellow-500/50'
+                            : 'hover:scale-105'
+                        }`}
+                        style={
+                          isSelected || isActive
+                            ? undefined
+                            : { backgroundColor: `${color}25`, color, border: `1px solid ${color}40` }
+                        }
+                        title={`${w.start.toFixed(2)}s → ${w.end.toFixed(2)}s`}
+                      >
+                        {w.word}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="w-px bg-[#1a1a2a]" />
+
+            {/* RIGHT: Word edit panel */}
+            <div className="w-[240px] shrink-0 space-y-2.5">
+              {selectedWordIdx >= 0 && wordTimings[selectedWordIdx] ? (
+                (() => {
+                  const w = wordTimings[selectedWordIdx];
+                  return (
+                    <>
+                      <div className="text-[10px] text-gray-500 flex items-center justify-between">
+                        <span>✏️ Edit word #{selectedWordIdx + 1}</span>
+                        <span className="text-gray-700">{wordTimings.length} total</span>
+                      </div>
+
+                      {/* Large word display */}
+                      <div className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg p-2.5 text-center">
+                        <input
+                          type="text"
+                          value={w.word}
+                          onChange={e => updateWordTiming(selectedWordIdx, 'word', e.target.value)}
+                          className="w-full bg-transparent text-center text-lg font-bold text-white outline-none border-b border-transparent focus:border-purple-500 transition"
+                          placeholder="word..."
+                        />
+                      </div>
+
+                      {/* Timing */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-gray-500 w-10">Start</label>
+                          <input
+                            type="number" step={0.01}
+                            value={w.start}
+                            onChange={e => updateWordTiming(selectedWordIdx, 'start', parseFloat(e.target.value) || 0)}
+                            className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1 text-xs text-blue-400 font-mono outline-none focus:border-blue-500"
+                          />
+                          <span className="text-[10px] text-gray-600">s</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-gray-500 w-10">End</label>
+                          <input
+                            type="number" step={0.01}
+                            value={w.end}
+                            onChange={e => updateWordTiming(selectedWordIdx, 'end', parseFloat(e.target.value) || 0)}
+                            className="flex-1 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1 text-xs text-blue-400 font-mono outline-none focus:border-blue-500"
+                          />
+                          <span className="text-[10px] text-gray-600">s</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-gray-500 w-10">Dur</label>
+                          <span className="flex-1 text-xs text-gray-400 font-mono px-2 py-1">
+                            {(w.end - w.start).toFixed(3)}s
+                          </span>
+                        </div>
+                        {w.probability !== undefined && (
+                          <div className="flex items-center gap-2">
+                            <label className="text-[10px] text-gray-500 w-10">Conf</label>
+                            <div className="flex-1 flex items-center gap-1.5">
+                              <div className="flex-1 h-1.5 bg-[#1a1a2a] rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    w.probability > 0.8 ? 'bg-green-500' : w.probability > 0.5 ? 'bg-yellow-500' : 'bg-red-500'
+                                  }`}
+                                  style={{ width: `${Math.round(w.probability * 100)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] text-gray-400 font-mono w-8">{(w.probability * 100).toFixed(0)}%</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="grid grid-cols-2 gap-1.5 pt-1">
+                        <button
+                          onClick={() => seekTo(w.start + audioStart)}
+                          className="flex items-center justify-center gap-1 px-2 py-1.5 bg-purple-600/30 hover:bg-purple-500/40 rounded-lg text-xs text-purple-200 transition"
+                        >
+                          <Play size={11} /> Play
+                        </button>
+                        <button
+                          onClick={() => insertWord(selectedWordIdx)}
+                          className="flex items-center justify-center gap-1 px-2 py-1.5 bg-green-600/20 hover:bg-green-500/30 rounded-lg text-xs text-green-300 transition"
+                        >
+                          <Plus size={11} /> Insert
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (selectedWordIdx > 0) {
+                              setSelectedWordIdx(selectedWordIdx - 1);
+                              seekTo(wordTimings[selectedWordIdx - 1].start + audioStart);
+                            }
+                          }}
+                          disabled={selectedWordIdx === 0}
+                          className="flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-700/40 hover:bg-gray-600/50 rounded-lg text-xs text-gray-300 transition disabled:opacity-30"
+                        >
+                          ← Prev
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (selectedWordIdx < wordTimings.length - 1) {
+                              setSelectedWordIdx(selectedWordIdx + 1);
+                              seekTo(wordTimings[selectedWordIdx + 1].start + audioStart);
+                            }
+                          }}
+                          disabled={selectedWordIdx === wordTimings.length - 1}
+                          className="flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-700/40 hover:bg-gray-600/50 rounded-lg text-xs text-gray-300 transition disabled:opacity-30"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => { deleteWord(selectedWordIdx); setSelectedWordIdx(-1); }}
+                        className="w-full flex items-center justify-center gap-1 px-2 py-1.5 bg-red-600/20 hover:bg-red-500/30 rounded-lg text-xs text-red-300 transition"
+                      >
+                        <X size={11} /> Delete word
+                      </button>
+                    </>
+                  );
+                })()
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center gap-2">
+                  <Type size={24} className="text-gray-700" />
+                  <p className="text-xs text-gray-500">Click a word on the left to edit</p>
+                  <p className="text-[10px] text-gray-700">text · timing · confidence</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
