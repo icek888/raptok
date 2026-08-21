@@ -243,8 +243,8 @@ export function TimelinePreview({
   const endPct = timeToX(audioEnd);
   const playheadPct = timeToX(currentTime);
 
-  // ─── Visible words (in viewport) ───
-  const visibleWords = wordTimings.map((w, i) => ({ w, i })).filter(({ w }) => w.end >= viewportStart && w.start <= viewportEnd);
+  // ─── Visible words (in viewport) — convert video-relative to absolute ───
+  const visibleWords = wordTimings.map((w, i) => ({ w, i })).filter(({ w }) => (w.end + audioStart) >= viewportStart && (w.start + audioStart) <= viewportEnd);
 
   // ─── Zoom controls ───
   const zoomIn = () => {
@@ -398,8 +398,10 @@ export function TimelinePreview({
 
         {/* Word blocks — colorful with text */}
         {visibleWords.map(({ w, i }) => {
-          const left = timeToX(w.start);
-          const width = Math.max(0.8, ((w.end - w.start) / viewportSize) * 100);
+          const absStart = w.start + audioStart;
+          const absEnd = w.end + audioStart;
+          const left = timeToX(absStart);
+          const width = Math.max(0.8, ((absEnd - absStart) / viewportSize) * 100);
           const color = WORD_COLORS[i % WORD_COLORS.length];
           const isActive = i === activeWordIdx;
           const isEditing = i === editingWordIdx;
