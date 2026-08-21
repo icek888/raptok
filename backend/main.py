@@ -67,6 +67,13 @@ async def get_templates():
                 "blur_sigma": t.blur_sigma,
                 "dark_overlay": t.dark_overlay,
                 "scale_factor": t.scale_factor,
+                "margin_v": t.margin_v,
+                "active_scale": t.active_scale,
+                "glow_border": t.glow_border,
+                "fade_in": t.fade_in,
+                "outline_color": t.outline_color,
+                "outline_width": t.outline_width,
+                "bold": t.bold,
             }
             for t in TEMPLATES
         ]

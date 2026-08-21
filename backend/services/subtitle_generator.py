@@ -240,7 +240,7 @@ def generate_ass(
         glow_border = 0
         fade_in = False
     
-    alignment_map = {"bottom": 2, "center": 8, "top": 10}
+    alignment_map = {"bottom": 2, "center": 5, "top": 8}
     alignment = alignment_map.get(position, 2)
     
     ass_header = f"""[Script Info]

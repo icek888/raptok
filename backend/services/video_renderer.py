@@ -125,33 +125,41 @@ def render_clip(
     # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
     # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
     if video_mode == "crop_fill":
-        # Full-screen zoomed video — no blur, no bars, no overlay
+        # Full-screen zoomed video — no blur, no bars
         scale_filter = (
             f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
             f"subtitles={ass_path}[final]"
         )
     elif video_mode == "fit_blur_dark":
-        # Clear video centered + dark blurred bg behind
+        # Clear video scaled down + dark blurred video bg fills entire frame
         scaled_w = int(OUTPUT_WIDTH * scale_factor)
         scaled_h = int(OUTPUT_HEIGHT * scale_factor)
         scale_filter = (
-            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
-            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black[padded];"
+            # BG: video zoomed to fill 9:16 + blur + dark
             f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
             f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
-            f"[bg][padded]overlay=0:0[withbg];"
+            # FG: clear video scaled to fit within scaled_w x scaled_h box
+            f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+            # Overlay: dynamic center — ffmpeg calculates (W-w)/2 : (H-h)/2
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+            # Burn subtitles on top
             f"[withbg]subtitles={ass_path}[final]"
         )
     else:
-        # fit_blur (default) — clear video + blurred bg
+        # fit_blur (default) — clear video scaled + blurred bg
+        scaled_w = int(OUTPUT_WIDTH * scale_factor)
+        scaled_h = int(OUTPUT_HEIGHT * scale_factor)
         scale_filter = (
-            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
-            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black[padded];"
+            # BG: blurred video fills entire 9:16
             f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
             f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
-            f"[bg][padded]overlay=0:0[withbg];"
+            # FG: clear video scaled down
+            f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+            # Overlay: dynamic center
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+            # Burn subtitles
             f"[withbg]subtitles={ass_path}[final]"
         )
     

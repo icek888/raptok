@@ -712,11 +712,11 @@ export function SubtitleEditor({
             audioStart={audioStart}
             audioEnd={audioEnd}
             onRangeChange={handleRangeChange}
+            onWordTimingsChange={onWordTimingsChange}
             onSeek={seekTo}
             currentTime={playTime}
             isPlaying={isPlaying}
             onPlayPause={togglePlay}
-            displayMode={displayMode}
           />
         </div>
       )}
