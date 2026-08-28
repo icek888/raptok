@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Play, Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, Scissors, Combine, Trash2, Edit3 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, Scissors, Combine, Trash2, Edit3, Maximize2 } from 'lucide-react';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo } from '../types';
 
 interface Props {
@@ -19,12 +19,13 @@ interface Props {
   onPlayPause: () => void;
 }
 
-// Colors for word blocks — cycle through
 const WORD_COLORS = [
   '#3b82f6', '#a855f7', '#ec4899', '#f59e0b',
   '#10b981', '#06b6d4', '#ef4444', '#8b5cf6',
   '#f97316', '#14b8a6', '#eab308', '#6366f1',
 ];
+
+const MAX_ZOOM = 80; // 80x zoom — very detailed word editing
 
 export function TimelinePreview({
   fragments, subtitles,
@@ -32,44 +33,37 @@ export function TimelinePreview({
   onWordTimingsChange,
   onSeek, currentTime, isPlaying, onPlayPause,
 }: Props) {
-  // ─── Zoom state ───
-  const [zoomLevel, setZoomLevel] = useState(1); // 1 = full timeline, 10 = max zoom
-  const [zoomCenter, setZoomCenter] = useState(0); // center of zoom in seconds
-  const [autoZoom, setAutoZoom] = useState(true); // auto-zoom to selected range
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [zoomCenter, setZoomCenter] = useState(0);
+  const [autoZoom, setAutoZoom] = useState(true);
 
-  // ─── Drag state ───
   const [dragging, setDragging] = useState(false);
-  const [dragMode, setDragMode] = useState<'range-start' | 'range-end' | 'range-move' | 'word-move' | 'word-resize-left' | 'word-resize-right' | 'none'>('none');
+  const [dragMode, setDragMode] = useState<'range-start' | 'range-end' | 'range-move' | 'word-move' | 'word-resize-left' | 'word-resize-right' | 'pan' | 'none'>('none');
   const [dragWordIdx, setDragWordIdx] = useState(-1);
   const [dragStartX, setDragStartX] = useState(0);
-  const [dragStartData, setDragStartData] = useState({ start: 0, end: 0, wordStart: 0, wordEnd: 0 });
+  const [dragStartData, setDragStartData] = useState({ start: 0, end: 0, wordStart: 0, wordEnd: 0, zoomCenter: 0 });
 
-  // ─── Context menu ───
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; wordIdx: number } | null>(null);
-
-  // ─── Editing ───
   const [editingWordIdx, setEditingWordIdx] = useState(-1);
   const [editText, setEditText] = useState('');
 
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const duration = audioInfo?.duration || 0;
 
-  // ─── Auto-zoom when range changes ───
+  // Auto-zoom when range changes
   useEffect(() => {
     if (autoZoom && audioEnd > audioStart) {
       setZoomCenter((audioStart + audioEnd) / 2);
       const rangeSize = audioEnd - audioStart;
       const viewportSize = duration / zoomLevel;
       if (rangeSize < viewportSize * 0.5) {
-        // Zoom in to show ~2x the range
-        const newZoom = Math.min(20, Math.max(1, duration / (rangeSize * 2)));
+        const newZoom = Math.min(MAX_ZOOM, Math.max(1, duration / (rangeSize * 2)));
         setZoomLevel(newZoom);
       }
     }
   }, [audioStart, audioEnd, autoZoom, duration, zoomLevel]);
 
-  // ─── Viewport calculation ───
-  const viewportSize = duration / zoomLevel; // seconds visible
+  const viewportSize = duration / zoomLevel;
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
   const viewportEnd = Math.min(duration, viewportStart + viewportSize);
 
@@ -96,24 +90,27 @@ export function TimelinePreview({
     onSeek?.(clamped);
   };
 
-  // ─── Timeline click → seek ───
+  // Scroll viewport by delta seconds
+  const scrollViewport = (deltaSec: number) => {
+    const newCenter = Math.max(viewportSize / 2, Math.min(duration - viewportSize / 2, zoomCenter + deltaSec));
+    setZoomCenter(newCenter);
+  };
+
   const handleTimelineClick = (e: React.MouseEvent) => {
     if (dragging || contextMenu) return;
     const t = xToTime(e.clientX);
     handleSeek(t);
   };
 
-  // ─── Range drag handlers ───
   const handleRangeMouseDown = (e: React.MouseEvent, mode: 'start' | 'end' | 'move') => {
     e.stopPropagation();
     e.preventDefault();
     setDragging(true);
     setDragMode(mode === 'start' ? 'range-start' : mode === 'end' ? 'range-end' : 'range-move');
     setDragStartX(e.clientX);
-    setDragStartData({ start: audioStart, end: audioEnd, wordStart: 0, wordEnd: 0 });
+    setDragStartData({ start: audioStart, end: audioEnd, wordStart: 0, wordEnd: 0, zoomCenter });
   };
 
-  // ─── Word drag handlers ───
   const handleWordMouseDown = (e: React.MouseEvent, idx: number, mode: 'move' | 'resize-left' | 'resize-right') => {
     if (!onWordTimingsChange) return;
     e.stopPropagation();
@@ -123,10 +120,21 @@ export function TimelinePreview({
     setDragMode(`word-${mode}` as any);
     setDragWordIdx(idx);
     setDragStartX(e.clientX);
-    setDragStartData({ start: audioStart, end: audioEnd, wordStart: w.start, wordEnd: w.end });
+    setDragStartData({ start: audioStart, end: audioEnd, wordStart: w.start, wordEnd: w.end, zoomCenter });
   };
 
-  // ─── Mouse move (global) ───
+  // Pan (middle-click or space+drag to scroll timeline)
+  const handlePanStart = (e: React.MouseEvent) => {
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragging(true);
+      setDragMode('pan');
+      setDragStartX(e.clientX);
+      setDragStartData({ start: 0, end: 0, wordStart: 0, wordEnd: 0, zoomCenter });
+    }
+  };
+
   useEffect(() => {
     if (!dragging) return;
     const handleMove = (e: MouseEvent) => {
@@ -140,6 +148,9 @@ export function TimelinePreview({
         const rangeW = dragStartData.end - dragStartData.start;
         let ns = Math.max(0, Math.min(dragStartData.start + deltaT, duration - rangeW));
         onRangeChange(ns, ns + rangeW);
+      } else if (dragMode === 'pan') {
+        const newCenter = Math.max(viewportSize / 2, Math.min(duration - viewportSize / 2, dragStartData.zoomCenter - deltaT));
+        setZoomCenter(newCenter);
       } else if (dragMode === 'word-move' && dragWordIdx >= 0 && onWordTimingsChange) {
         const wordW = dragStartData.wordEnd - dragStartData.wordStart;
         let ns = Math.max(0, dragStartData.wordStart + deltaT);
@@ -171,9 +182,9 @@ export function TimelinePreview({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [dragging, dragMode, dragStartX, dragStartData, dragWordIdx, duration, audioStart, audioEnd, onRangeChange, onWordTimingsChange, wordTimings, xToTime]);
+  }, [dragging, dragMode, dragStartX, dragStartData, dragWordIdx, duration, audioStart, audioEnd, onRangeChange, onWordTimingsChange, wordTimings, xToTime, viewportSize]);
 
-  // ─── Context menu actions ───
+  // Context menu actions
   const splitWord = (idx: number) => {
     if (!onWordTimingsChange) return;
     const w = wordTimings[idx];
@@ -221,7 +232,6 @@ export function TimelinePreview({
     setEditText('');
   };
 
-  // ─── Close context menu on click ───
   useEffect(() => {
     const close = () => setContextMenu(null);
     if (contextMenu) {
@@ -230,7 +240,6 @@ export function TimelinePreview({
     }
   }, [contextMenu]);
 
-  // ─── Video time ───
   const videoTime = currentTime - audioStart;
   const activeWord = videoTime >= 0
     ? wordTimings.find(w => videoTime >= w.start && videoTime <= w.end)
@@ -243,17 +252,16 @@ export function TimelinePreview({
   const endPct = timeToX(audioEnd);
   const playheadPct = timeToX(currentTime);
 
-  // ─── Visible words (in viewport) — convert video-relative to absolute ───
   const visibleWords = wordTimings.map((w, i) => ({ w, i })).filter(({ w }) => (w.end + audioStart) >= viewportStart && (w.start + audioStart) <= viewportEnd);
 
-  // ─── Zoom controls ───
+  // Zoom controls
   const zoomIn = () => {
     setAutoZoom(false);
-    setZoomLevel(z => Math.min(20, z * 1.5));
+    setZoomLevel(z => Math.min(MAX_ZOOM, z * 1.8));
   };
   const zoomOut = () => {
     setAutoZoom(false);
-    setZoomLevel(z => Math.max(1, z / 1.5));
+    setZoomLevel(z => Math.max(1, z / 1.8));
   };
   const zoomFit = () => {
     setAutoZoom(false);
@@ -264,8 +272,19 @@ export function TimelinePreview({
     setAutoZoom(false);
     const rangeSize = audioEnd - audioStart;
     setZoomCenter((audioStart + audioEnd) / 2);
-    setZoomLevel(Math.min(20, Math.max(1, duration / Math.max(rangeSize * 1.2, 1))));
+    setZoomLevel(Math.min(MAX_ZOOM, Math.max(1, duration / Math.max(rangeSize * 1.2, 1))));
   };
+
+  // Timeline height adapts to zoom — taller when zoomed in
+  const timelineHeight = zoomLevel > 10 ? 120 : zoomLevel > 5 ? 100 : zoomLevel > 2 ? 80 : 64;
+
+  // Scroll slider: represents viewport position within full track
+  const scrollPct = duration > 0 ? (viewportStart / duration) * 100 : 0;
+  const scrollWidthPct = duration > 0 ? (viewportSize / duration) * 100 : 100;
+
+  // Word block height — more space when zoomed in
+  const wordTop = zoomLevel > 5 ? 6 : 4;
+  const wordBottom = 2;
 
   return (
     <div className="space-y-2">
@@ -288,14 +307,21 @@ export function TimelinePreview({
           <button onClick={zoomOut} className="p-1.5 hover:bg-[#2a2a3a] rounded transition" title="Zoom out">
             <ZoomOut size={14} className="text-gray-400" />
           </button>
-          <span className="text-[10px] text-gray-500 font-mono w-10 text-center">{zoomLevel.toFixed(1)}x</span>
+          {/* Zoom slider */}
+          <input
+            type="range" min={1} max={MAX_ZOOM} step={0.5}
+            value={zoomLevel}
+            onChange={e => { setAutoZoom(false); setZoomLevel(parseFloat(e.target.value)); }}
+            className="w-20 accent-purple-500"
+            title={`Zoom: ${zoomLevel.toFixed(1)}x`}
+          />
           <button onClick={zoomIn} className="p-1.5 hover:bg-[#2a2a3a] rounded transition" title="Zoom in">
             <ZoomIn size={14} className="text-gray-400" />
           </button>
-          <button onClick={zoomToRange} className="px-2 py-1 text-[10px] text-gray-400 hover:bg-[#2a2a3a] rounded transition" title="Zoom to selection">
-            Fit
+          <button onClick={zoomToRange} className="flex items-center gap-1 px-2 py-1 text-[10px] text-purple-300 hover:bg-purple-500/10 rounded transition" title="Zoom to selection">
+            <Maximize2 size={10} /> Fit
           </button>
-          <button onClick={zoomFit} className="px-2 py-1 text-[10px] text-gray-400 hover:bg-[#2a2a3a] rounded transition" title="Reset zoom">
+          <button onClick={zoomFit} className="px-2 py-1 text-[10px] text-gray-400 hover:bg-[#2a2a3a] rounded transition" title="Reset zoom (1:1)">
             1:1
           </button>
           <button
@@ -329,11 +355,13 @@ export function TimelinePreview({
         </div>
       </div>
 
-      {/* ── Word Timeline ── */}
+      {/* ── Word Timeline (taller, more space for words) ── */}
       <div
         ref={timelineRef}
-        className="relative h-20 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg cursor-pointer overflow-hidden select-none"
+        className={`relative bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg cursor-pointer overflow-hidden select-none`}
+        style={{ height: `${timelineHeight}px` }}
         onClick={handleTimelineClick}
+        onMouseDown={handlePanStart}
         onContextMenu={(e) => {
           if (!onWordTimingsChange) return;
           e.preventDefault();
@@ -396,27 +424,34 @@ export function TimelinePreview({
           <div className="w-1 h-full bg-yellow-500 rounded-full" />
         </div>
 
-        {/* Word blocks — colorful with text */}
+        {/* Word blocks — colorful, taller, bigger text when zoomed */}
         {visibleWords.map(({ w, i }) => {
           const absStart = w.start + audioStart;
           const absEnd = w.end + audioStart;
           const left = timeToX(absStart);
-          const width = Math.max(0.8, ((absEnd - absStart) / viewportSize) * 100);
+          const width = Math.max(1.5, ((absEnd - absStart) / viewportSize) * 100);
           const color = WORD_COLORS[i % WORD_COLORS.length];
           const isActive = i === activeWordIdx;
           const isEditing = i === editingWordIdx;
           const isDragging = i === dragWordIdx && dragging;
 
+          // Font size adapts to zoom and word width
+          const fontSize = width > 15 ? '16px' : width > 8 ? '14px' : width > 4 ? '12px' : '10px';
+          const showText = width > 2;
+
           return (
             <div
               key={i}
-              className={`absolute top-4 bottom-2 rounded-md flex items-center justify-center cursor-move transition-opacity ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-80' : ''}`}
+              className={`absolute rounded-md flex items-center justify-center cursor-move transition-opacity ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-80' : ''}`}
               style={{
+                top: `${wordTop}px`,
+                bottom: `${wordBottom}px`,
                 left: `${left}%`,
                 width: `${width}%`,
                 backgroundColor: `${color}40`,
                 border: `1px solid ${color}`,
                 borderBottom: `3px solid ${color}`,
+                minHeight: '28px',
               }}
               onMouseDown={(e) => handleWordMouseDown(e, i, 'move')}
               onDoubleClick={(e) => { e.stopPropagation(); editWord(i); }}
@@ -425,14 +460,14 @@ export function TimelinePreview({
               {/* Left resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/30 rounded-l-md"
+                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/40 rounded-l-md"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-left')}
                 />
               )}
               {/* Right resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/30 rounded-r-md"
+                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/40 rounded-r-md"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-right')}
                 />
               )}
@@ -445,16 +480,16 @@ export function TimelinePreview({
                   onBlur={saveEdit}
                   onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); }}
                   onClick={(e) => e.stopPropagation()}
-                  className="bg-[#0a0a0f] text-white text-[10px] text-center px-1 w-full outline-none border border-purple-500 rounded"
+                  className="bg-[#0a0a0f] text-white text-center px-1 w-full outline-none border border-purple-500 rounded"
+                  style={{ fontSize }}
                   autoFocus
-                  style={{ fontSize: width > 4 ? '11px' : '8px' }}
                 />
               ) : (
                 <span
-                  className="text-white truncate px-0.5 select-none"
-                  style={{ fontSize: width > 6 ? '11px' : width > 3 ? '9px' : '7px' }}
+                  className="text-white truncate px-1 select-none font-medium"
+                  style={{ fontSize }}
                 >
-                  {w.word}
+                  {showText ? w.word : ''}
                 </span>
               )}
             </div>
@@ -465,11 +500,63 @@ export function TimelinePreview({
         <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-40 pointer-events-none" style={{ left: `${playheadPct}%` }} />
       </div>
 
+      {/* ── Scroll slider for navigation when zoomed ── */}
+      {zoomLevel > 1.1 && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => scrollViewport(-viewportSize * 0.5)}
+            className="p-1 hover:bg-[#2a2a3a] rounded transition"
+            title="Scroll left"
+          >
+            <SkipBack size={12} className="text-gray-400" />
+          </button>
+          {/* Scroll track — shows where viewport is within the full track */}
+          <div
+            className="relative flex-1 h-6 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg cursor-pointer"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pct = (e.clientX - rect.left) / rect.width;
+              const newStart = Math.max(0, Math.min(duration - viewportSize, pct * duration - viewportSize / 2));
+              setZoomCenter(newStart + viewportSize / 2);
+            }}
+          >
+            {/* Mini waveform preview */}
+            {audioInfo?.rms_values && (
+              <div className="absolute inset-0 flex items-end gap-px px-1 pb-0.5 pointer-events-none">
+                {audioInfo.rms_values.map((v: number, i: number) => (
+                  <div key={i} className="flex-1 bg-purple-500/10 rounded-sm" style={{ height: `${Math.min(100, v * 150)}%` }} />
+                ))}
+              </div>
+            )}
+            {/* Viewport indicator */}
+            <div
+              className="absolute top-0 bottom-0 bg-purple-500/20 border border-purple-500/50 rounded pointer-events-none"
+              style={{ left: `${scrollPct}%`, width: `${Math.max(2, scrollWidthPct)}%` }}
+            />
+            {/* Playhead on minimap */}
+            <div
+              className="absolute top-0 bottom-0 w-px bg-red-500/60 pointer-events-none"
+              style={{ left: `${(currentTime / duration) * 100}%` }}
+            />
+          </div>
+          <button
+            onClick={() => scrollViewport(viewportSize * 0.5)}
+            className="p-1 hover:bg-[#2a2a3a] rounded transition"
+            title="Scroll right"
+          >
+            <SkipForward size={12} className="text-gray-400" />
+          </button>
+          <span className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
+            {fmtTime(viewportStart)} → {fmtTime(viewportEnd)}
+          </span>
+        </div>
+      )}
+
       {/* ── Tip line ── */}
       <div className="text-[10px] text-gray-600 flex items-center gap-3">
         <span>💡 Click to seek · Drag words to move · Drag edges to resize</span>
         {onWordTimingsChange && <span className="text-gray-700">· Right-click for menu · Double-click to edit</span>}
-        <span className="ml-auto">Viewport: {fmtTime(viewportStart)} - {fmtTime(viewportEnd)}</span>
+        {zoomLevel > 1.1 && <span className="text-gray-700">· Shift+drag to pan</span>}
       </div>
 
       {/* ── Context menu ── */}

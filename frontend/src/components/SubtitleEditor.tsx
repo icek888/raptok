@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Type, Mic, Sparkles, Scissors, Play, Pause, Plus, X, Layout, Check } from 'lucide-react';
+import { Loader2, Type, Mic, Sparkles, Play, Pause, Plus, X, Layout, Check } from 'lucide-react';
 import { api } from '../api/client';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, RenderTemplate } from '../types';
 import { TimelinePreview } from './TimelinePreview';
@@ -47,7 +47,7 @@ export function SubtitleEditor({
   const [whisperModel, setWhisperModel] = useState('small');
   const [wordSplitLoading, setWordSplitLoading] = useState(false);
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
-  const [audioLoading, setAudioLoading] = useState(false);
+  const [, setAudioLoading] = useState(false);
   const [audioStart, setAudioStart] = useState(0);
   const [audioEnd, setAudioEnd] = useState(0);
   const [showWordEditor, setShowWordEditor] = useState(false);
@@ -731,68 +731,10 @@ export function SubtitleEditor({
         </div>
       )}
 
-      {/* ── Audio Range + Transcribe (compact) ── */}
+      {/* ── Transcribe controls (compact, no audio range — use yellow slider) ── */}
       {audioPath && (
-        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-3 space-y-2">
+        <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-2.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <Scissors size={14} className="text-blue-400" />
-            <span className="text-xs font-medium text-blue-300">Audio Range</span>
-            {audioLoading && <Loader2 size={12} className="animate-spin text-gray-400" />}
-            <span className="text-xs text-gray-500 ml-auto">
-              {audioStart.toFixed(0)}s - {audioEnd.toFixed(0)}s ({(audioEnd - audioStart).toFixed(0)}s)
-            </span>
-          </div>
-          {audioInfo && !audioLoading && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <input
-                  type="range" min={0} max={audioInfo.duration} step={0.1}
-                  value={audioStart}
-                  onChange={e => setAudioStart(Math.min(parseFloat(e.target.value), audioEnd - 1))}
-                  className="flex-1 accent-blue-500"
-                />
-                <input
-                  type="range" min={0} max={audioInfo.duration} step={0.1}
-                  value={audioEnd}
-                  onChange={e => setAudioEnd(Math.max(parseFloat(e.target.value), audioStart + 1))}
-                  className="flex-1 accent-blue-500"
-                />
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="text-gray-500">
-                  Start: <input
-                    type="number" step="0.1" min="0" max={audioInfo.duration}
-                    value={audioStart}
-                    onChange={e => setAudioStart(Math.min(parseFloat(e.target.value) || 0, audioEnd - 1))}
-                    className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-blue-400 font-mono"
-                  />s
-                </span>
-                <span className="text-gray-500">
-                  End: <input
-                    type="number" step="0.1" min="0" max={audioInfo.duration}
-                    value={audioEnd}
-                    onChange={e => setAudioEnd(Math.max(parseFloat(e.target.value) || audioInfo.duration, audioStart + 1))}
-                    className="w-14 bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-blue-400 font-mono"
-                  />s
-                </span>
-                <button
-                  onClick={() => { setAudioStart(0); setAudioEnd(audioInfo.duration); }}
-                  className="ml-auto px-2 py-0.5 text-xs bg-blue-500/20 hover:bg-blue-500/30 rounded text-blue-300"
-                >
-                  Select All
-                </button>
-                {audioInfo.suggested_start > 0 && (
-                  <button
-                    onClick={() => { setAudioStart(audioInfo.suggested_start); setAudioEnd(audioInfo.suggested_end); }}
-                    className="px-2 py-0.5 text-xs bg-yellow-500/20 hover:bg-yellow-500/30 rounded text-yellow-300"
-                  >
-                    💡 Suggested
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="flex items-center gap-2">
             <select
               value={transcribeLang}
               onChange={e => setTranscribeLang(e.target.value)}
@@ -826,7 +768,7 @@ export function SubtitleEditor({
               </span>
             )}
             {hasFullTranscription && (
-              <span className="text-xs text-blue-400">📜 Full track ready — drag range to filter</span>
+              <span className="text-xs text-blue-400">📜 Full track — drag yellow slider to filter</span>
             )}
           </div>
         </div>
