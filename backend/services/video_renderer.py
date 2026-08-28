@@ -189,13 +189,3 @@ def render_clip(
         raise RuntimeError(f"ffmpeg render failed: {result.stderr[:500]}")
     
     return str(output_path)
-
-
-def _get_alignment(style: SubtitleStyle) -> int:
-    """Get ASS alignment from style position."""
-    return {"bottom": 2, "center": 8, "top": 10}.get(style.position, 2)
-
-
-def get_render_duration(fragments: list[Fragment]) -> float:
-    """Get total duration of the final clip."""
-    return sum(f.duration for f in fragments)

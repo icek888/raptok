@@ -5,13 +5,11 @@ import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, Rend
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
 import { TrackAnalysisPanel } from './TrackAnalysisPanel';
+import { assToCss, cssToAss } from '../utils/colors';
+import { WORD_COLORS } from '../utils/constants';
+import { useTemplates, applyTemplateToStyle } from '../utils/templates';
 
-// Colors for word chips — cycle through lines
-const WORD_COLORS = [
-  '#3b82f6', '#a855f7', '#ec4899', '#f59e0b',
-  '#10b981', '#06b6d4', '#ef4444', '#8b5cf6',
-  '#f97316', '#14b8a6', '#eab308', '#6366f1',
-];
+
 
 interface Props {
   lyrics: string;
@@ -52,15 +50,10 @@ export function SubtitleEditor({
   const [audioEnd, setAudioEnd] = useState(0);
   const [showWordEditor, setShowWordEditor] = useState(false);
   const [selectedWordIdx, setSelectedWordIdx] = useState(-1);
-  // ── Template popup state ──
-  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
+  // ── Template popup state (templates loaded via useTemplates hook) ──
+  const { templates } = useTemplates();
   const [showTemplatePopup, setShowTemplatePopup] = useState(false);
   const [previewThumb, setPreviewThumb] = useState<string | null>(null);
-
-  // ── Load templates on mount ──
-  useEffect(() => {
-    api.getTemplates().then(data => setTemplates(data.templates)).catch(() => {});
-  }, []);
 
   // ── Load first frame thumbnail for template previews ──
   useEffect(() => {
@@ -77,21 +70,9 @@ export function SubtitleEditor({
     }
   }, [fragments, videoUrl]);
 
-  // ── Apply template to style (ALL fields) ──
+  // ── Apply template (shared utility) ──
   const applyTemplate = (tmpl: RenderTemplate) => {
-    onStyleChange({
-      font: tmpl.font,
-      size: tmpl.size,
-      primary_color: tmpl.primary_color,
-      active_color: tmpl.active_color,
-      outline_color: tmpl.outline_color,
-      outline_width: tmpl.outline_width,
-      position: tmpl.position as 'bottom' | 'center' | 'top',
-      margin_v: tmpl.margin_v,
-      bold: tmpl.bold,
-    });
-    onDisplayModeChange(tmpl.display_mode as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word');
-    onTemplateChange?.(tmpl.id);
+    applyTemplateToStyle(tmpl, onStyleChange, onDisplayModeChange, (id) => onTemplateChange?.(id));
     setShowTemplatePopup(false);
   };
 
@@ -329,11 +310,6 @@ export function SubtitleEditor({
                   {templates.map(tmpl => {
                     const isSelected = templateId === tmpl.id;
                     // Convert ASS BGR color to CSS RGB for preview
-                    const assToCss = (c: string) => {
-                      const hex = c.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-                      if (hex.length < 6) return '#ffffff';
-                      return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-                    };
                     const activeCss = assToCss(tmpl.active_color);
                     const primaryCss = assToCss(tmpl.primary_color);
                     // CSS filter per video_mode
@@ -560,17 +536,8 @@ export function SubtitleEditor({
             <div className="flex items-center gap-1">
               <input
                 type="color"
-                value={(() => {
-                  const hex = style.active_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-                  if (hex.length < 8) return '#facc15';
-                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-                })()}
-                onChange={e => {
-                  const r = e.target.value.substring(1, 3);
-                  const g = e.target.value.substring(3, 5);
-                  const b = e.target.value.substring(5, 7);
-                  onStyleChange({ ...style, active_color: `&H00${b}${g}${r}` });
-                }}
+                value={assToCss(style.active_color)}
+                onChange={e => onStyleChange({ ...style, active_color: cssToAss(e.target.value) })}
                 className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
                 title="Active word color"
               />
@@ -579,17 +546,8 @@ export function SubtitleEditor({
             <div className="flex items-center gap-1">
               <input
                 type="color"
-                value={(() => {
-                  const hex = style.primary_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-                  if (hex.length < 8) return '#ffffff';
-                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-                })()}
-                onChange={e => {
-                  const r = e.target.value.substring(1, 3);
-                  const g = e.target.value.substring(3, 5);
-                  const b = e.target.value.substring(5, 7);
-                  onStyleChange({ ...style, primary_color: `&H00${b}${g}${r}` });
-                }}
+                value={assToCss(style.primary_color)}
+                onChange={e => onStyleChange({ ...style, primary_color: cssToAss(e.target.value) })}
                 className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
                 title="Text color"
               />
@@ -598,17 +556,8 @@ export function SubtitleEditor({
             <div className="flex items-center gap-1">
               <input
                 type="color"
-                value={(() => {
-                  const hex = style.outline_color.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-                  if (hex.length < 8) return '#000000';
-                  return `#${hex.substring(6, 8)}${hex.substring(4, 6)}${hex.substring(2, 4)}`;
-                })()}
-                onChange={e => {
-                  const r = e.target.value.substring(1, 3);
-                  const g = e.target.value.substring(3, 5);
-                  const b = e.target.value.substring(5, 7);
-                  onStyleChange({ ...style, outline_color: `&H00${b}${g}${r}` });
-                }}
+                value={assToCss(style.outline_color)}
+                onChange={e => onStyleChange({ ...style, outline_color: cssToAss(e.target.value) })}
                 className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
                 title="Outline color"
               />

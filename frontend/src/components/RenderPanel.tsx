@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle, Layout } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, RenderTemplate, WordTiming } from '../types';
+import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, WordTiming } from '../types';
+import { useTemplates } from '../utils/templates';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -20,11 +21,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
-
-  useEffect(() => {
-    api.getTemplates().then(data => setTemplates(data.templates)).catch(() => {});
-  }, []);
+  const { templates } = useTemplates();
 
   const canRender = videoInfo && fragments.length >= 3 && audioPath && subtitles.length > 0;
   const totalDuration = fragments.reduce((s, f) => s + f.duration, 0);

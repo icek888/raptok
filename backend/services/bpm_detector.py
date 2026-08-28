@@ -108,17 +108,3 @@ def get_beat_aligned_starts(
         starts.append(beats[-1])
     
     return starts
-
-
-def snap_to_beat(timestamp: float, beats: list[float], tolerance: float = 0.1) -> float:
-    """Snap a timestamp to the nearest beat position."""
-    if not beats:
-        return timestamp
-    
-    beats_arr = np.array(beats)
-    nearest_idx = np.argmin(np.abs(beats_arr - timestamp))
-    nearest = beats[nearest_idx]
-    
-    if abs(nearest - timestamp) <= tolerance:
-        return nearest
-    return timestamp

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, SkipBack, SkipForward, ZoomIn, ZoomOut, Scissors, Combine, Trash2, Edit3, Maximize2 } from 'lucide-react';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo } from '../types';
+import { WORD_COLORS } from '../utils/constants';
+import { formatTime } from '../utils/format';
 
 interface Props {
   fragments: Fragment[];
@@ -18,12 +20,6 @@ interface Props {
   isPlaying: boolean;
   onPlayPause: () => void;
 }
-
-const WORD_COLORS = [
-  '#3b82f6', '#a855f7', '#ec4899', '#f59e0b',
-  '#10b981', '#06b6d4', '#ef4444', '#8b5cf6',
-  '#f97316', '#14b8a6', '#eab308', '#6366f1',
-];
 
 const MAX_ZOOM = 80; // 80x zoom — very detailed word editing
 
@@ -79,11 +75,7 @@ export function TimelinePreview({
     return viewportStart + pct * viewportSize;
   }, [viewportStart, viewportSize]);
 
-  const fmtTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = (s % 60).toFixed(1);
-    return `${m}:${sec.padStart(4, '0')}`;
-  };
+  // fmtTime now uses shared formatTime from utils/format.ts
 
   const handleSeek = (time: number) => {
     const clamped = Math.max(0, Math.min(duration, time));
@@ -300,7 +292,7 @@ export function TimelinePreview({
           <SkipForward size={14} className="text-gray-400" />
         </button>
         <span className="text-xs text-gray-400 font-mono ml-1">
-          {fmtTime(currentTime)} / {fmtTime(duration)}
+          {formatTime(currentTime)} / {formatTime(duration)}
         </span>
 
         <div className="flex items-center gap-1 ml-auto">
@@ -409,7 +401,7 @@ export function TimelinePreview({
           onMouseDown={(e) => handleRangeMouseDown(e, 'move')}
         >
           <span className="absolute top-0 left-1 text-[8px] text-yellow-400/80 font-mono whitespace-nowrap pointer-events-none">
-            {fmtTime(audioStart)}-{fmtTime(audioEnd)}
+            {formatTime(audioStart)}-{formatTime(audioEnd)}
           </span>
         </div>
         {/* Range handles */}
@@ -566,7 +558,7 @@ export function TimelinePreview({
             <SkipForward size={12} className="text-gray-400" />
           </button>
           <span className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
-            {fmtTime(viewportStart)} → {fmtTime(viewportEnd)}
+            {formatTime(viewportStart)} → {formatTime(viewportEnd)}
           </span>
         </div>
       )}

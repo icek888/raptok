@@ -139,11 +139,7 @@ export const api = {
       max_frag: maxFrag,
     }),
 
-  // ─── New: Speech Recognition ───
-  transcribe: (audioPath: string, language: string = 'en'): Promise<TranscribeResult> =>
-    postJSON(`${API_BASE}/transcribe`, { audio_path: audioPath, language }),
-
-  // ─── New: Audio Info (duration, waveform, BPM) ───
+  // ─── Audio Info (duration, waveform, BPM) ───
   audioInfo: (audioPath: string): Promise<AudioInfo> =>
     postJSON(`${API_BASE}/audio-info`, { audio_path: audioPath }),
 
@@ -151,24 +147,7 @@ export const api = {
   trackAnalysis: (audioPath: string): Promise<TrackAnalysis> =>
     postJSON(`${API_BASE}/track-analysis`, { audio_path: audioPath }),
 
-  // ─── New: Transcribe fragment (with start/end selection + forced alignment) ───
-  transcribeFragment: (
-    audioPath: string,
-    language: string,
-    start: number,
-    end: number,
-    lyrics?: string,
-  ): Promise<TranscribeResult> => {
-    const form = new FormData();
-    form.append('audio_path', audioPath);
-    form.append('language', language);
-    form.append('start', String(start));
-    form.append('end', String(end));
-    if (lyrics) form.append('lyrics', lyrics);
-    return postForm(`${API_BASE}/transcribe-fragment`, form);
-  },
-
-  // ─── NEW: Transcribe ENTIRE audio (absolute timestamps) ───
+  // ─── Transcribe full track (WhisperX) ───
   transcribeFull: (
     audioPath: string,
     language: string = 'en',

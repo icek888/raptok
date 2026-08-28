@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Type, Palette, Layout, Eye, Film } from 'lucide-react';
 import type { SubtitleLine, SubtitleStyle, WordTiming, Fragment, RenderTemplate, VideoInfo } from '../types';
-import { api } from '../api/client';
+import { assToCss, cssToAss } from '../utils/colors';
+import { POSITION_MAP } from '../utils/constants';
+import { useTemplates, applyTemplateToStyle } from '../utils/templates';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -21,26 +23,9 @@ interface Props {
   onTemplateChange: (id: string) => void;
 }
 
-// ASS color → CSS color
-// ASS format: &H00BBGGRR or &HBBGGRR (00 = opaque alpha prefix)
-function assToCss(assColor: string): string {
-  let hex = assColor.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
-  // Strip alpha prefix if 8 digits (00BBGGRR → BBGGRR)
-  if (hex.length === 8) hex = hex.substring(2);
-  if (hex.length >= 6) {
-    const b = hex.substring(0, 2);
-    const g = hex.substring(2, 4);
-    const r = hex.substring(4, 6);
-    return `#${r}${g}${b}`;
-  }
-  return '#FFFFFF';
-}
+// ASS color → CSS color conversion is now in utils/colors.ts
 
-const POSITION_MAP: Record<string, string> = {
-  bottom: 'flex-end',
-  center: 'center',
-  top: 'flex-start',
-};
+// POSITION_MAP is now in utils/constants.ts
 
 export function VideoPreviewEditor({
   videoInfo, videoUrl, fragments,
@@ -52,12 +37,10 @@ export function VideoPreviewEditor({
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [templates, setTemplates] = useState<RenderTemplate[]>([]);
+  const { templates } = useTemplates();
   const [activeTab, setActiveTab] = useState<'templates' | 'style' | 'layout'>('templates');
 
-  useEffect(() => {
-    api.getTemplates().then(r => setTemplates(r.templates)).catch(() => {});
-  }, []);
+  // Templates loaded via useTemplates() hook (cached)
 
   // ── Time update ──
   const onTimeUpdate = useCallback(() => {
@@ -94,21 +77,9 @@ export function VideoPreviewEditor({
   const activeSub = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
   const activeWord = wordTimings.find(w => currentTime >= w.start && currentTime <= w.end);
 
-  // ── Apply template ──
+  // ── Apply template (shared utility) ──
   const applyTemplate = (tmpl: RenderTemplate) => {
-    onStyleChange({
-      font: tmpl.font,
-      size: tmpl.size,
-      primary_color: tmpl.primary_color,
-      active_color: tmpl.active_color,
-      outline_color: tmpl.outline_color,
-      outline_width: tmpl.outline_width,
-      position: tmpl.position as 'bottom' | 'center' | 'top',
-      margin_v: tmpl.margin_v,
-      bold: tmpl.bold,
-    });
-    onDisplayModeChange(tmpl.display_mode as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word');
-    onTemplateChange(tmpl.id);
+    applyTemplateToStyle(tmpl, onStyleChange, onDisplayModeChange, onTemplateChange);
   };
 
   // ── CSS subtitle rendering ──
@@ -294,11 +265,7 @@ export function VideoPreviewEditor({
                   <input
                     type="color"
                     value={assToCss(style.primary_color)}
-                    onChange={e => {
-                      const hex = e.target.value.replace('#', '');
-                      const r = hex.substring(0, 2), g = hex.substring(2, 4), b = hex.substring(4, 6);
-                      onStyleChange({ ...style, primary_color: `&H00${b}${g}${r}` });
-                    }}
+                    onChange={e => onStyleChange({ ...style, primary_color: cssToAss(e.target.value) })}
                     className="w-10 h-8 rounded border border-[#2a2a3a] bg-transparent cursor-pointer"
                   />
                   <span className="text-xs text-gray-400 font-mono">{assToCss(style.primary_color)}</span>
@@ -312,11 +279,7 @@ export function VideoPreviewEditor({
                   <input
                     type="color"
                     value={assToCss(style.active_color)}
-                    onChange={e => {
-                      const hex = e.target.value.replace('#', '');
-                      const r = hex.substring(0, 2), g = hex.substring(2, 4), b = hex.substring(4, 6);
-                      onStyleChange({ ...style, active_color: `&H00${b}${g}${r}` });
-                    }}
+                    onChange={e => onStyleChange({ ...style, active_color: cssToAss(e.target.value) })}
                     className="w-10 h-8 rounded border border-[#2a2a3a] bg-transparent cursor-pointer"
                   />
                   <span className="text-xs text-gray-400 font-mono">{assToCss(style.active_color)}</span>
@@ -330,11 +293,7 @@ export function VideoPreviewEditor({
                   <input
                     type="color"
                     value={assToCss(style.outline_color)}
-                    onChange={e => {
-                      const hex = e.target.value.replace('#', '');
-                      const r = hex.substring(0, 2), g = hex.substring(2, 4), b = hex.substring(4, 6);
-                      onStyleChange({ ...style, outline_color: `&H00${b}${g}${r}` });
-                    }}
+                    onChange={e => onStyleChange({ ...style, outline_color: cssToAss(e.target.value) })}
                     className="w-10 h-8 rounded border border-[#2a2a3a] bg-transparent cursor-pointer"
                   />
                   <span className="text-xs text-gray-400 font-mono">{assToCss(style.outline_color)}</span>
