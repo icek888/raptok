@@ -1,9 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Type, Palette, Layout, Eye, Film } from 'lucide-react';
-import type { SubtitleLine, SubtitleStyle, WordTiming, Fragment, RenderTemplate, VideoInfo } from '../types';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Type, Palette, Layout, Eye, Film, Loader2 } from 'lucide-react';
+import type { SubtitleLine, SubtitleStyle, WordTiming, Fragment, RenderTemplate, VideoInfo, PreviewResult } from '../types';
 import { assToCss, cssToAss } from '../utils/colors';
 import { POSITION_MAP } from '../utils/constants';
 import { useTemplates, applyTemplateToStyle } from '../utils/templates';
+import { api } from '../api/client';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -28,17 +29,44 @@ interface Props {
 // POSITION_MAP is now in utils/constants.ts
 
 export function VideoPreviewEditor({
-  videoInfo, videoUrl, fragments,
+  videoInfo, videoUrl, fragments, audioPath, audioStart,
   subtitles, wordTimings, style, onStyleChange,
   karaoke, onKaraokeChange, displayMode, onDisplayModeChange,
   templateId, onTemplateChange,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const { templates } = useTemplates();
   const [activeTab, setActiveTab] = useState<'templates' | 'style' | 'layout'>('templates');
+
+  // ── Preview clip state ──
+  const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // ── Prepare preview clip when entering Step 3 ──
+  useEffect(() => {
+    if (!videoUrl || fragments.length === 0 || previewData) return;
+    setPreparing(true);
+    setPreviewError(null);
+    api.preparePreview(
+      videoUrl,
+      fragments,
+      audioPath,
+      audioStart,
+      wordTimings,
+      subtitles,
+    ).then(data => {
+      setPreviewData(data);
+      setPreparing(false);
+    }).catch(err => {
+      setPreviewError(err instanceof Error ? err.message : 'Failed to prepare preview');
+      setPreparing(false);
+    });
+  }, [videoUrl, fragments.length]); // intentionally not depending on wordTimings/subtitles to avoid re-extracting on edits
 
   // Templates loaded via useTemplates() hook (cached)
 
@@ -51,31 +79,39 @@ export function VideoPreviewEditor({
 
   const togglePlay = () => {
     if (!videoRef.current) return;
-    if (isPlaying) { videoRef.current.pause(); } else { videoRef.current.play(); }
+    if (isPlaying) {
+      videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
+    } else {
+      videoRef.current.play();
+      if (audioRef.current) {
+        audioRef.current.currentTime = videoRef.current.currentTime;
+        audioRef.current.play();
+      }
+    }
     setIsPlaying(!isPlaying);
   };
 
   const seekTo = (t: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = Math.max(0, Math.min(t, duration));
-    }
+    const clamped = Math.max(0, Math.min(t, duration || previewDuration));
+    if (videoRef.current) videoRef.current.currentTime = clamped;
+    if (audioRef.current) audioRef.current.currentTime = clamped;
   };
 
-  // ── Convert container path to API URL ──
-  // local_path is like "/tmp/raptok/abc123.mp4" → need "/api/video/abc123.mp4"
-  const videoApiUrl = (() => {
-    if (!videoUrl) return null;
-    const filename = videoUrl.split('/').pop();
-    if (!filename) return null;
-    return `/api/video/${filename}`;
-  })();
+  // ── Use preview clip data if available, fall back to raw ──
+  const activeVideoUrl = previewData?.video_url || null;
+  const activeAudioUrl = previewData?.audio_url || null;
+  const previewDuration = previewData?.duration || 0;
+  const previewSubs = previewData?.subtitles || subtitles;
+  const previewWords = previewData?.word_timings || wordTimings;
+  const previewFragments = previewData?.fragments || fragments;
 
   // ── Find active fragment at current time ──
-  const activeFragment = fragments.find(f => currentTime >= f.start && currentTime <= f.end);
+  const activeFragment = previewFragments.find((f: any) => currentTime >= f.start && currentTime <= f.end);
 
   // ── Find active subtitle at current time ──
-  const activeSub = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
-  const activeWord = wordTimings.find(w => currentTime >= w.start && currentTime <= w.end);
+  const activeSub = previewSubs.find(s => currentTime >= s.start && currentTime <= s.end);
+  const activeWord = previewWords.find(w => currentTime >= w.start && currentTime <= w.end);
 
   // ── Apply template (shared utility) ──
   const applyTemplate = (tmpl: RenderTemplate) => {
@@ -91,10 +127,10 @@ export function VideoPreviewEditor({
 
     const baseStyle: React.CSSProperties = {
       fontFamily: `'${style.font}', sans-serif`,
-      fontSize: `${style.size * 0.5}px`, // scale for preview (1080→540 height)
+      fontSize: `${style.size * 0.25}px`, // scale: preview is 270px wide, render is 1080px (270/1080 = 0.25)
       fontWeight: style.bold ? 'bold' : 'normal',
       color: primaryCss,
-      textShadow: `-${style.outline_width * 0.5}px -${style.outline_width * 0.5}px 0 ${outlineCss}, ${style.outline_width * 0.5}px -${style.outline_width * 0.5}px 0 ${outlineCss}, -${style.outline_width * 0.5}px ${style.outline_width * 0.5}px 0 ${outlineCss}, ${style.outline_width * 0.5}px ${style.outline_width * 0.5}px 0 ${outlineCss}`,
+      textShadow: `-${style.outline_width * 0.25}px -${style.outline_width * 0.25}px 0 ${outlineCss}, ${style.outline_width * 0.25}px -${style.outline_width * 0.25}px 0 ${outlineCss}, -${style.outline_width * 0.25}px ${style.outline_width * 0.25}px 0 ${outlineCss}, ${style.outline_width * 0.25}px ${style.outline_width * 0.25}px 0 ${outlineCss}`,
       textAlign: 'center',
       lineHeight: 1.3,
       padding: '0 20px',
@@ -386,8 +422,8 @@ export function VideoPreviewEditor({
               {videoInfo && (
                 <div className="pt-2 border-t border-[#1a1a2a] space-y-1">
                   <div className="text-[10px] text-gray-500">Video: {videoInfo.width}×{videoInfo.height}</div>
-                  <div className="text-[10px] text-gray-500">Fragments: {fragments.length}</div>
-                  <div className="text-[10px] text-gray-500">Subtitles: {subtitles.length} lines · {wordTimings.length} words</div>
+                  <div className="text-[10px] text-gray-500">Fragments: {previewFragments.length}</div>
+                  <div className="text-[10px] text-gray-500">Subtitles: {previewSubs.length} lines · {previewWords.length} words</div>
                 </div>
               )}
             </div>
@@ -404,19 +440,37 @@ export function VideoPreviewEditor({
               height: 480,
             }}
           >
-            {videoApiUrl ? (
-              <video
-                ref={videoRef}
-                src={videoApiUrl}
-                onTimeUpdate={onTimeUpdate}
-                onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                className="absolute inset-0 w-full h-full object-cover"
-                muted
-                playsInline
-              />
-            ) : (
+            {preparing && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 text-sm gap-2 z-10">
+                <Loader2 size={28} className="animate-spin text-purple-400" />
+                <span>Preparing preview clip...</span>
+                <span className="text-[10px] text-gray-600">Extracting {fragments.length} fragments</span>
+              </div>
+            )}
+            {previewError && !preparing && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-red-400 text-sm gap-2">
+                <span>Preview failed: {previewError}</span>
+              </div>
+            )}
+            {activeVideoUrl && !preparing ? (
+              <>
+                <video
+                  ref={videoRef}
+                  src={activeVideoUrl}
+                  onTimeUpdate={onTimeUpdate}
+                  onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={() => { setIsPlaying(false); if (audioRef.current) audioRef.current.pause(); }}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                />
+                {activeAudioUrl && (
+                  <audio ref={audioRef} src={activeAudioUrl} preload="auto" />
+                )}
+              </>
+            ) : !preparing && !previewError && (
               <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-sm gap-2">
                 <Film size={32} className="text-gray-700" />
                 <span>No video loaded</span>
@@ -468,10 +522,10 @@ export function VideoPreviewEditor({
           {/* Timeline scrubber with fragments */}
           <div className="w-full max-w-md mt-3">
             {/* Fragment bar */}
-            {fragments.length > 0 && duration > 0 && (
+            {previewFragments.length > 0 && (duration > 0 || previewDuration > 0) && (
               <div className="flex items-center gap-1 mb-1.5 text-[10px] text-gray-500">
                 <span>Fragments:</span>
-                {fragments.map((f, i) => (
+                {previewFragments.map((f: any, i: number) => (
                   <span key={i} className="px-1.5 py-0.5 rounded text-[9px] font-mono"
                         style={{
                           backgroundColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.3)' : 'rgba(30,30,50,0.5)',
@@ -495,26 +549,26 @@ export function VideoPreviewEditor({
                 style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
               />
               {/* Fragment markers */}
-              {fragments.map((f) => (
+              {previewFragments.map((f: any) => (
                 <div
                   key={f.id}
                   className="absolute top-0 h-full border-l border-r"
                   style={{
-                    left: `${duration > 0 ? (f.start / duration) * 100 : 0}%`,
-                    width: `${duration > 0 ? ((f.end - f.start) / duration) * 100 : 0}%`,
+                    left: `${(duration || previewDuration) > 0 ? (f.start / (duration || previewDuration)) * 100 : 0}%`,
+                    width: `${(duration || previewDuration) > 0 ? ((f.end - f.start) / (duration || previewDuration)) * 100 : 0}%`,
                     backgroundColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.25)' : 'rgba(30,80,160,0.15)',
                     borderColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.6)' : 'rgba(30,80,160,0.3)',
                   }}
                 />
               ))}
               {/* Subtitle markers */}
-              {subtitles.map(s => (
+              {previewSubs.map(s => (
                 <div
                   key={s.id}
                   className="absolute top-0 h-full bg-yellow-500/20"
                   style={{
-                    left: `${duration > 0 ? (s.start / duration) * 100 : 0}%`,
-                    width: `${duration > 0 ? ((s.end - s.start) / duration) * 100 : 0}%`,
+                    left: `${(duration || previewDuration) > 0 ? (s.start / (duration || previewDuration)) * 100 : 0}%`,
+                    width: `${(duration || previewDuration) > 0 ? ((s.end - s.start) / (duration || previewDuration)) * 100 : 0}%`,
                   }}
                 />
               ))}

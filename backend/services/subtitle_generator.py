@@ -305,35 +305,29 @@ def generate_ass(
     """
     output_path = TEMP_DIR / f"{job_id}.ass"
     
-    # Apply template overrides if provided
+    # Template ONLY controls video rendering effects (active_scale, glow_border, fade_in).
+    # Subtitle style (font, size, color, position, etc.) comes entirely from `style` —
+    # the frontend already merges template defaults into style state, and user overrides
+    # on top. So generate_ass must NOT override style fields from template.
     if template:
-        font = template.get("font", style.font)
-        size = template.get("size", style.size)
-        primary = template.get("primary_color", style.primary_color)
-        outline = template.get("outline_color", style.outline_color)
-        active = template.get("active_color", style.active_color)
-        outline_w = template.get("outline_width", style.outline_width)
-        position = template.get("position", style.position)
-        margin_v = template.get("margin_v", style.margin_v)
-        bold_flag = "-1" if template.get("bold", style.bold) else "0"
-        display_mode = template.get("display_mode", display_mode)
-        karaoke = template.get("karaoke", karaoke)
         active_scale = template.get("active_scale", 130)
         glow_border = template.get("glow_border", 0)
         fade_in = template.get("fade_in", False)
     else:
-        font = style.font
-        size = style.size
-        primary = style.primary_color
-        outline = style.outline_color
-        active = style.active_color
-        outline_w = style.outline_width
-        position = style.position
-        margin_v = style.margin_v if style.margin_v > 0 else 80
-        bold_flag = "-1" if style.bold else "0"
         active_scale = 130
         glow_border = 0
         fade_in = False
+    
+    # Use style fields directly (user's choice, possibly modified from template defaults)
+    font = style.font
+    size = style.size
+    primary = style.primary_color
+    outline = style.outline_color
+    active = style.active_color
+    outline_w = style.outline_width
+    position = style.position
+    margin_v = style.margin_v
+    bold_flag = "-1" if style.bold else "0"
     
     alignment_map = {"bottom": 2, "center": 5, "top": 8}
     alignment = alignment_map.get(position, 2)

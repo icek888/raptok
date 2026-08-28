@@ -185,3 +185,13 @@ export interface TrackAnalysis {
   };
   sections: SongSection[];
 }
+
+// ── Preview clip result ──
+export interface PreviewResult {
+  video_url: string;
+  audio_url: string | null;
+  duration: number;
+  word_timings: WordTiming[];
+  subtitles: SubtitleLine[];
+  fragments: { id: number; start: number; end: number; duration: number }[];
+}

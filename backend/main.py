@@ -15,6 +15,7 @@ from models.schemas import (
     BPMRequest, BPMResult, BeatSyncRequest, BeatSyncResult,
     TranscribeRequest, TranscribeResult,
     WordTiming, WordSubtitleRequest, SubtitleAdjustRequest,
+    PreparePreviewRequest,
 )
 from services.downloader import download_video
 from services.fragment_selector import select_fragments, replace_fragment, get_total_duration
@@ -165,11 +166,8 @@ async def api_render(req: RenderRequest):
             tmpl = next((t for t in TEMPLATES if t.id == req.template_id), None)
             if tmpl:
                 template_dict = tmpl.model_dump()
-                # Only override display_mode/karaoke if user hasn't explicitly set them
-                if req.display_mode == "line_highlight":
-                    req.display_mode = tmpl.display_mode
-                if not req.karaoke:
-                    req.karaoke = tmpl.karaoke
+                # Template controls ONLY video params (blur, overlay, scale, glow, fade_in, active_scale).
+                # Subtitle style + display_mode + karaoke come from frontend as-is.
                 logger.info(f"Template video params: {tmpl.name} — font={req.style.font}, size={req.style.size}, color={req.style.active_color}, blur={tmpl.blur_sigma}, mode={req.display_mode}")
             else:
                 logger.warning(f"Template not found: {req.template_id}")
@@ -286,6 +284,136 @@ async def audio_preview(filename: str):
         if filename in f.name:
             return FileResponse(str(f), media_type="audio/mpeg")
     raise HTTPException(status_code=404, detail="Audio file not found")
+
+
+# ─── Preview clip: concat selected fragments + extract audio segment ───
+
+@app.post("/api/prepare-preview")
+async def prepare_preview(req: PreparePreviewRequest):
+    """
+    Extract a preview clip from the source video by concatenating selected fragments.
+    Also extracts the corresponding audio segment.
+    Returns URLs for video + audio that the frontend can use in <video>/<audio> tags.
+    """
+    try:
+        import subprocess
+        import tempfile
+
+        fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
+        if not fragments:
+            raise HTTPException(status_code=400, detail="No fragments provided")
+
+        job_id = f"preview_{os.urandom(6).hex()}"
+
+        # ── 1. Concat video fragments into one clip ──
+        # Build ffmpeg concat filter
+        inputs = []
+        filter_parts = []
+        for i, frag in enumerate(fragments):
+            inputs.extend(["-ss", str(frag.start), "-t", str(frag.duration)])
+            filter_parts.append(f"[{i}:v]")
+
+        # Use stream copy for speed (no re-encode)
+        # Build concat demuxer file
+        concat_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+        for frag in fragments:
+            concat_file.write(f"file '{req.video_path}'\n")
+            concat_file.write(f"ss {frag.start}\n")
+            concat_file.write(f"duration {frag.duration}\n")
+        # Repeat last entry (ffmpeg concat demuxer requirement)
+        last_frag = fragments[-1]
+        concat_file.write(f"file '{req.video_path}'\n")
+        concat_file.write(f"ss {last_frag.start}\n")
+        concat_file.close()
+
+        preview_video = TEMP_DIR / f"{job_id}.mp4"
+
+        # Use ffmpeg concat demuxer with stream copy
+        result = subprocess.run([
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+            "-i", concat_file.name,
+            "-c", "copy",
+            str(preview_video)
+        ], capture_output=True, timeout=120)
+
+        if result.returncode != 0:
+            # Fallback: re-encode if stream copy fails (different codecs etc.)
+            result = subprocess.run([
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", concat_file.name,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-an",
+                str(preview_video)
+            ], capture_output=True, timeout=180)
+
+        os.unlink(concat_file.name)
+
+        # ── 2. Extract audio segment (from audio_path, offset by audio_start) ──
+        preview_audio = None
+        if req.audio_path:
+            total_dur = sum(f.duration for f in fragments)
+            audio_start = req.audio_start or 0
+            preview_audio = TEMP_DIR / f"{job_id}_audio.mp3"
+            result = subprocess.run([
+                "ffmpeg", "-y",
+                "-ss", str(audio_start), "-t", str(total_dur),
+                "-i", req.audio_path,
+                "-ac", "2", "-ab", "128k",
+                str(preview_audio)
+            ], capture_output=True, timeout=120)
+            if result.returncode != 0:
+                preview_audio = None  # audio optional
+
+        # ── 3. Shift word timings to be 0-based (relative to concat clip) ──
+        shifted_timings = []
+        current_offset = 0.0
+        for frag in fragments:
+            for w in (req.word_timings or []):
+                # Words that fall within this fragment's time range
+                if w.get("start", 0) >= frag.start and w.get("end", 0) <= frag.end:
+                    shifted_timings.append({
+                        **w,
+                        "start": round(w["start"] - frag.start + current_offset, 3),
+                        "end": round(w["end"] - frag.start + current_offset, 3),
+                    })
+            current_offset += frag.duration
+
+        # ── 4. Shift subtitles similarly ──
+        shifted_subs = []
+        current_offset = 0.0
+        for frag in fragments:
+            for s in (req.subtitles or []):
+                if s.get("start", 0) >= frag.start and s.get("end", 0) <= frag.end:
+                    shifted_sub = {**s}
+                    shifted_sub["start"] = round(s["start"] - frag.start + current_offset, 3)
+                    shifted_sub["end"] = round(s["end"] - frag.start + current_offset, 3)
+                    if shifted_sub.get("words"):
+                        shifted_sub["words"] = [
+                            {**w,
+                             "start": round(w["start"] - frag.start + current_offset, 3),
+                             "end": round(w["end"] - frag.start + current_offset, 3)}
+                            for w in shifted_sub["words"]
+                        ]
+                    shifted_subs.append(shifted_sub)
+            current_offset += frag.duration
+
+        total_duration = sum(f.duration for f in fragments)
+
+        return {
+            "video_url": f"/api/video/{preview_video.name}",
+            "audio_url": f"/api/audio-preview/{preview_audio.name}" if preview_audio else None,
+            "duration": round(total_duration, 2),
+            "word_timings": shifted_timings,
+            "subtitles": shifted_subs,
+            "fragments": [
+                {"id": i, "start": round(sum(f.duration for f in fragments[:i]), 2),
+                 "end": round(sum(f.duration for f in fragments[:i+1]), 2),
+                 "duration": frag.duration}
+                for i, frag in enumerate(fragments)
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─── BPM Detection ───

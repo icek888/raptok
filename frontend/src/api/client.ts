@@ -1,6 +1,6 @@
 import type { 
   VideoInfo, Fragment, FragmentSelection, SubtitleLine, SubtitleStyle, 
-  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate, TrackAnalysis
+  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate, TrackAnalysis, PreviewResult
 } from '../types';
 
 const API_BASE = '/api';
@@ -110,6 +110,23 @@ export const api = {
 
   getTemplates: (): Promise<{ templates: RenderTemplate[] }> =>
     fetch(`${API_BASE}/templates`).then(r => r.json()),
+
+  preparePreview: (
+    videoPath: string,
+    fragments: Fragment[],
+    audioPath?: string | null,
+    audioStart?: number,
+    wordTimings?: WordTiming[],
+    subtitles?: SubtitleLine[],
+  ): Promise<PreviewResult> =>
+    postJSON(`${API_BASE}/prepare-preview`, {
+      video_path: videoPath,
+      fragments,
+      audio_path: audioPath || null,
+      audio_start: audioStart || 0,
+      word_timings: wordTimings || null,
+      subtitles: subtitles || null,
+    }),
 
   uploadAudio: (file: File): Promise<{ path: string; filename: string; size: number }> => {
     const form = new FormData();

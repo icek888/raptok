@@ -203,6 +203,16 @@ class RenderRequest(BaseModel):
     word_timings: Optional[list[dict]] = None  # Edited word timings from UI
 
 
+class PreparePreviewRequest(BaseModel):
+    """Request to prepare a preview clip from selected fragments."""
+    video_path: str
+    audio_path: Optional[str] = None
+    audio_start: float = 0.0
+    fragments: list[Fragment]
+    word_timings: Optional[list[dict]] = None
+    subtitles: Optional[list[dict]] = None
+
+
 class RenderStatus(BaseModel):
     job_id: str
     status: str  # pending, rendering, completed, error
