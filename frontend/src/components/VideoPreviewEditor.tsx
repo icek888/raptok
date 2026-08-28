@@ -22,8 +22,11 @@ interface Props {
 }
 
 // ASS color → CSS color
+// ASS format: &H00BBGGRR or &HBBGGRR (00 = opaque alpha prefix)
 function assToCss(assColor: string): string {
-  const hex = assColor.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+  let hex = assColor.replace('&H', '').replace(/[^0-9A-Fa-f]/g, '');
+  // Strip alpha prefix if 8 digits (00BBGGRR → BBGGRR)
+  if (hex.length === 8) hex = hex.substring(2);
   if (hex.length >= 6) {
     const b = hex.substring(0, 2);
     const g = hex.substring(2, 4);
@@ -74,6 +77,18 @@ export function VideoPreviewEditor({
       videoRef.current.currentTime = Math.max(0, Math.min(t, duration));
     }
   };
+
+  // ── Convert container path to API URL ──
+  // local_path is like "/tmp/raptok/abc123.mp4" → need "/api/video/abc123.mp4"
+  const videoApiUrl = (() => {
+    if (!videoUrl) return null;
+    const filename = videoUrl.split('/').pop();
+    if (!filename) return null;
+    return `/api/video/${filename}`;
+  })();
+
+  // ── Find active fragment at current time ──
+  const activeFragment = fragments.find(f => currentTime >= f.start && currentTime <= f.end);
 
   // ── Find active subtitle at current time ──
   const activeSub = subtitles.find(s => currentTime >= s.start && currentTime <= s.end);
@@ -430,10 +445,10 @@ export function VideoPreviewEditor({
               height: 480,
             }}
           >
-            {videoUrl ? (
+            {videoApiUrl ? (
               <video
                 ref={videoRef}
-                src={videoUrl}
+                src={videoApiUrl}
                 onTimeUpdate={onTimeUpdate}
                 onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
                 onPlay={() => setIsPlaying(true)}
@@ -443,8 +458,10 @@ export function VideoPreviewEditor({
                 playsInline
               />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-gray-600 text-sm">
-                No video
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-sm gap-2">
+                <Film size={32} className="text-gray-700" />
+                <span>No video loaded</span>
+                <span className="text-[10px] text-gray-700">Go back to Step 1 to add a video</span>
               </div>
             )}
 
@@ -489,8 +506,23 @@ export function VideoPreviewEditor({
             </span>
           </div>
 
-          {/* Timeline scrubber */}
+          {/* Timeline scrubber with fragments */}
           <div className="w-full max-w-md mt-3">
+            {/* Fragment bar */}
+            {fragments.length > 0 && duration > 0 && (
+              <div className="flex items-center gap-1 mb-1.5 text-[10px] text-gray-500">
+                <span>Fragments:</span>
+                {fragments.map((f, i) => (
+                  <span key={i} className="px-1.5 py-0.5 rounded text-[9px] font-mono"
+                        style={{
+                          backgroundColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.3)' : 'rgba(30,30,50,0.5)',
+                          color: activeFragment?.id === f.id ? '#c084fc' : '#666',
+                        }}>
+                    #{i+1} {f.start.toFixed(1)}-{f.end.toFixed(1)}s
+                  </span>
+                ))}
+              </div>
+            )}
             <div
               className="relative h-2 bg-[#0a0a0f] border border-[#1a1a2a] rounded-full cursor-pointer"
               onClick={e => {
@@ -503,17 +535,36 @@ export function VideoPreviewEditor({
                 className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full"
                 style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
               />
+              {/* Fragment markers */}
+              {fragments.map((f) => (
+                <div
+                  key={f.id}
+                  className="absolute top-0 h-full border-l border-r"
+                  style={{
+                    left: `${duration > 0 ? (f.start / duration) * 100 : 0}%`,
+                    width: `${duration > 0 ? ((f.end - f.start) / duration) * 100 : 0}%`,
+                    backgroundColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.25)' : 'rgba(30,80,160,0.15)',
+                    borderColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.6)' : 'rgba(30,80,160,0.3)',
+                  }}
+                />
+              ))}
               {/* Subtitle markers */}
               {subtitles.map(s => (
                 <div
                   key={s.id}
-                  className="absolute top-0 h-full bg-blue-500/30"
+                  className="absolute top-0 h-full bg-yellow-500/20"
                   style={{
                     left: `${duration > 0 ? (s.start / duration) * 100 : 0}%`,
                     width: `${duration > 0 ? ((s.end - s.start) / duration) * 100 : 0}%`,
                   }}
                 />
               ))}
+            </div>
+            {/* Legend */}
+            <div className="flex items-center gap-3 mt-1 text-[9px] text-gray-600">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500/30 rounded-sm" /> Fragment</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-yellow-500/20 rounded-sm" /> Subtitle</span>
+              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-600 rounded-sm" /> Playhead</span>
             </div>
           </div>
 

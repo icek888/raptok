@@ -255,6 +255,18 @@ async def download_file(filename: str):
     return FileResponse(str(filepath), media_type="video/mp4", filename=filename)
 
 
+@app.get("/api/video/{filename}")
+async def serve_video(filename: str):
+    """Serve source video from temp dir for preview."""
+    # Security: only allow .mp4 files, no path traversal
+    if ".." in filename or "/" in filename or not filename.endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    filepath = TEMP_DIR / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(str(filepath), media_type="video/mp4", filename=filename)
+
+
 @app.get("/api/thumbnail/{filename}")
 async def get_thumbnail_file(filename: str):
     """Serve a thumbnail image."""
