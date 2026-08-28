@@ -460,14 +460,14 @@ export function TimelinePreview({
               {/* Left resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/40 rounded-l-md"
+                  className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-l-md"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-left')}
                 />
               )}
               {/* Right resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-white/40 rounded-r-md"
+                  className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-r-md"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-right')}
                 />
               )}
@@ -510,14 +510,33 @@ export function TimelinePreview({
           >
             <SkipBack size={12} className="text-gray-400" />
           </button>
-          {/* Scroll track — shows where viewport is within the full track */}
+          {/* Scroll track — draggable, shows where viewport is within the full track */}
           <div
             className="relative flex-1 h-6 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg cursor-pointer"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = (e.clientX - rect.left) / rect.width;
+            onMouseDown={(e) => {
+              const trackEl = e.currentTarget;
+              const startDragX = e.clientX;
+              const startVpStart = viewportStart;
+              const trackRect = trackEl.getBoundingClientRect();
+              
+              const handleScrollMove = (ev: MouseEvent) => {
+                const dx = ev.clientX - startDragX;
+                const deltaT = (dx / trackRect.width) * duration;
+                const newStart = Math.max(0, Math.min(duration - viewportSize, startVpStart + deltaT));
+                setZoomCenter(newStart + viewportSize / 2);
+              };
+              const handleScrollUp = () => {
+                window.removeEventListener('mousemove', handleScrollMove);
+                window.removeEventListener('mouseup', handleScrollUp);
+              };
+              
+              // Also handle click-to-jump on first click
+              const pct = (e.clientX - trackRect.left) / trackRect.width;
               const newStart = Math.max(0, Math.min(duration - viewportSize, pct * duration - viewportSize / 2));
               setZoomCenter(newStart + viewportSize / 2);
+              
+              window.addEventListener('mousemove', handleScrollMove);
+              window.addEventListener('mouseup', handleScrollUp);
             }}
           >
             {/* Mini waveform preview */}

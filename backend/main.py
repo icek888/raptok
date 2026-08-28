@@ -181,9 +181,15 @@ async def api_render(req: RenderRequest):
         
         # DEBUG: Log what we receive
         words_count = sum(len(s.words) for s in subtitles if s.words)
-        logger.info(f"Render: {len(subtitles)} subs, {words_count} words, template={req.template_id or 'none'}")
+        logger.info(f"Render: {len(subtitles)} subs, {words_count} words, template={req.template_id or 'none'}, word_timings={len(req.word_timings) if req.word_timings else 0}")
         for i, s in enumerate(subtitles[:3]):
             logger.info(f"  sub[{i}]: text='{s.text[:30]}', words={len(s.words) if s.words else 0}")
+        
+        # ── If edited word_timings provided, rebuild subtitles from them ──
+        if req.word_timings and len(req.word_timings) > 0:
+            from services.subtitle_generator import rebuild_subtitles_from_words
+            subtitles = rebuild_subtitles_from_words(req.word_timings)
+            logger.info(f"Rebuilt {len(subtitles)} subtitles from {len(req.word_timings)} edited word_timings")
         
         # If audio_start is set, extract the fragment from audio first
         audio_path = req.audio_path

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle, Layout } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, RenderTemplate } from '../types';
+import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, RenderTemplate, WordTiming } from '../types';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -9,13 +9,14 @@ interface Props {
   audioPath: string | null;
   audioStart: number;
   subtitles: SubtitleLine[];
+  wordTimings?: WordTiming[];
   style: SubtitleStyle;
   karaoke: boolean;
   displayMode: string;
   templateId?: string;
 }
 
-export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, style, karaoke, displayMode, templateId }: Props) {
+export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, wordTimings, style, karaoke, displayMode, templateId }: Props) {
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
     setError(null);
     setResult(null);
     try {
-      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '');
+      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '', wordTimings);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Render failed');

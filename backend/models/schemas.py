@@ -200,6 +200,7 @@ class RenderRequest(BaseModel):
     karaoke: bool = False
     display_mode: str = "line_highlight"
     template_id: str = ""  # If set, overrides style/display_mode with template
+    word_timings: Optional[list[dict]] = None  # Edited word timings from UI
 
 
 class RenderStatus(BaseModel):

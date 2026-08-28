@@ -93,6 +93,7 @@ export const api = {
     audioStart: number = 0,
     displayMode: string = 'line_highlight',
     templateId: string = '',
+    wordTimings?: WordTiming[],
   ): Promise<RenderResult> =>
     postJSON(`${API_BASE}/render`, {
       video_path: videoPath,
@@ -104,6 +105,7 @@ export const api = {
       karaoke,
       display_mode: displayMode,
       template_id: templateId,
+      word_timings: wordTimings || null,
     }),
 
   getTemplates: (): Promise<{ templates: RenderTemplate[] }> =>

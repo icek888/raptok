@@ -139,7 +139,8 @@ function App() {
             />
           )}
 
-          {step === 2 && (
+          {/* Step 2: keep mounted, hide when not active — preserves internal state */}
+          <div style={{ display: step === 2 ? 'block' : 'none' }}>
             <SubtitleEditor
               lyrics={lyrics}
               fragments={fragments}
@@ -159,7 +160,7 @@ function App() {
               templateId={templateId}
               onTemplateChange={setTemplateId}
             />
-          )}
+          </div>
 
           {step === 3 && (
             <RenderPanel
@@ -168,6 +169,7 @@ function App() {
               audioPath={audioPath}
               audioStart={audioStart}
               subtitles={subtitles}
+              wordTimings={wordTimings}
               style={style}
               karaoke={karaoke}
               displayMode={displayMode}

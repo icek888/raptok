@@ -173,6 +173,9 @@ export function SubtitleEditor({
         lyrics || result.text, fragments, filtered, 0,
       );
       onSubtitlesChange(subResult.subtitles);
+      
+      // Auto-open Edit Words panel after transcription
+      setShowWordEditor(true);
     } catch (e) {
       console.error('Transcribe failed:', e);
     } finally {

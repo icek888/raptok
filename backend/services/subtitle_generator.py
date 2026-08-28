@@ -46,6 +46,57 @@ def split_lyrics(lyrics: str, fragments: list) -> list[SubtitleLine]:
     return subtitles
 
 
+def rebuild_subtitles_from_words(word_timings: list[dict]) -> list[SubtitleLine]:
+    """Rebuild SubtitleLine list from edited word_timings (from UI).
+    
+    Groups words by natural pauses (gap > 0.4s) or max 8 words per line.
+    Each word becomes a WordTiming with updated text/start/end.
+    """
+    if not word_timings:
+        return []
+    
+    # Convert dict timings to WordTiming objects
+    words = []
+    for wt in word_timings:
+        words.append(WordTiming(
+            word=wt.get('word', ''),
+            start=wt.get('start', 0),
+            end=wt.get('end', 0),
+            probability=wt.get('probability'),
+        ))
+    
+    # Group by natural pauses (gap > 0.4s) or max 8 words
+    subtitles: list[SubtitleLine] = []
+    current_line_words: list[WordTiming] = []
+    
+    for i, w in enumerate(words):
+        if current_line_words:
+            gap = w.start - current_line_words[-1].end
+            if gap > 0.4 or len(current_line_words) >= 8:
+                # Flush current line
+                subtitles.append(SubtitleLine(
+                    id=len(subtitles),
+                    start=round(current_line_words[0].start, 3),
+                    end=round(current_line_words[-1].end, 3),
+                    text=' '.join(ww.word for ww in current_line_words),
+                    words=current_line_words,
+                ))
+                current_line_words = []
+        current_line_words.append(w)
+    
+    # Flush remaining
+    if current_line_words:
+        subtitles.append(SubtitleLine(
+            id=len(subtitles),
+            start=round(current_line_words[0].start, 3),
+            end=round(current_line_words[-1].end, 3),
+            text=' '.join(ww.word for ww in current_line_words),
+            words=current_line_words,
+        ))
+    
+    return subtitles
+
+
 def split_lyrics_word_level(
     lyrics: str,
     fragments: list,
