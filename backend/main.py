@@ -360,36 +360,55 @@ async def prepare_preview(req: PreparePreviewRequest):
                 preview_audio = None  # audio optional
 
         # ── 3. Shift word timings to be 0-based (relative to concat clip) ──
+        # word_timings from frontend are 0-based relative to audio_start (already shifted
+        # by SubtitleEditor). Fragments are absolute (relative to source video).
+        # So we shift fragments by -audio_start to match word_timings' frame of reference.
+        audio_offset = req.audio_start or 0.0
         shifted_timings = []
         current_offset = 0.0
+        used_word_ids = set()
         for frag in fragments:
-            for w in (req.word_timings or []):
-                # Words that fall within this fragment's time range
-                if w.get("start", 0) >= frag.start and w.get("end", 0) <= frag.end:
+            # Shift fragment to 0-based (relative to audio_start)
+            frag_start_rel = frag.start - audio_offset
+            frag_end_rel = frag.end - audio_offset
+            for i, w in enumerate(req.word_timings or []):
+                if i in used_word_ids:
+                    continue
+                w_start = w.get("start", 0)
+                # Word belongs to this fragment if it starts within [frag_start_rel - 0.5, frag_end_rel)
+                if w_start >= frag_start_rel - 0.5 and w_start < frag_end_rel:
                     shifted_timings.append({
                         **w,
-                        "start": round(w["start"] - frag.start + current_offset, 3),
-                        "end": round(w["end"] - frag.start + current_offset, 3),
+                        "start": round(max(0, w["start"] - frag_start_rel + current_offset), 3),
+                        "end": round(max(0, w["end"] - frag_start_rel + current_offset), 3),
                     })
+                    used_word_ids.add(i)
             current_offset += frag.duration
 
         # ── 4. Shift subtitles similarly ──
         shifted_subs = []
         current_offset = 0.0
+        used_sub_ids = set()
         for frag in fragments:
-            for s in (req.subtitles or []):
-                if s.get("start", 0) >= frag.start and s.get("end", 0) <= frag.end:
+            frag_start_rel = frag.start - audio_offset
+            frag_end_rel = frag.end - audio_offset
+            for i, s in enumerate(req.subtitles or []):
+                if i in used_sub_ids:
+                    continue
+                s_start = s.get("start", 0)
+                if s_start >= frag_start_rel - 0.5 and s_start < frag_end_rel:
                     shifted_sub = {**s}
-                    shifted_sub["start"] = round(s["start"] - frag.start + current_offset, 3)
-                    shifted_sub["end"] = round(s["end"] - frag.start + current_offset, 3)
+                    shifted_sub["start"] = round(max(0, s["start"] - frag_start_rel + current_offset), 3)
+                    shifted_sub["end"] = round(max(0, s["end"] - frag_start_rel + current_offset), 3)
                     if shifted_sub.get("words"):
                         shifted_sub["words"] = [
                             {**w,
-                             "start": round(w["start"] - frag.start + current_offset, 3),
-                             "end": round(w["end"] - frag.start + current_offset, 3)}
+                             "start": round(max(0, w["start"] - frag_start_rel + current_offset), 3),
+                             "end": round(max(0, w["end"] - frag_start_rel + current_offset), 3)}
                             for w in shifted_sub["words"]
                         ]
                     shifted_subs.append(shifted_sub)
+                    used_sub_ids.add(i)
             current_offset += frag.duration
 
         total_duration = sum(f.duration for f in fragments)
