@@ -55,63 +55,79 @@ def split_lyrics_word_level(
     Split lyrics into subtitle lines with word-level karaoke timing.
     
     If word_timings is provided, use actual timestamps.
-    Group words into LINES using the user's original line breaks (newlines)
-    instead of arbitrary gap-based grouping. This preserves the user's
-    intended visual structure.
+    Group words into LINES using natural pauses and gaps in word timings.
+    User's lyrics line breaks are used as a hint for grouping, but
+    the actual grouping follows the word_timings (which may be filtered
+    to a specific audio range).
     
     If no word_timings, distribute words evenly across fragment time slots.
     """
     if word_timings and len(word_timings) > 0:
         # Use actual word timings from speech recognition
-        # Group words into lines using user's original line breaks
+        # Group words into lines based on natural pauses (gaps > 0.4s)
+        # and max words per line (8)
+        
         user_lines = [line.strip() for line in lyrics.split('\n') if line.strip()]
         
-        subtitles = []
-        word_idx = 0
+        # If user lyrics word count roughly matches word_timings count,
+        # use user line structure
+        user_word_count = sum(len(_tokenize_lyrics(line)) for line in user_lines)
+        wt_count = len(word_timings)
         
-        for line_idx, user_line in enumerate(user_lines):
-            line_words_from_text = _tokenize_lyrics(user_line)
-            n_words_in_line = len(line_words_from_text)
+        if user_word_count > 0 and abs(user_word_count - wt_count) <= max(5, wt_count * 0.2):
+            # Counts roughly match — use user's line structure
+            subtitles = []
+            word_idx = 0
             
-            # Take the next n words from word_timings
-            if word_idx >= len(word_timings):
-                break
-            
-            line_word_timings = word_timings[word_idx:word_idx + n_words_in_line]
-            if not line_word_timings:
-                break
-            
-            line_text = " ".join(w.word for w in line_word_timings)
-            subtitles.append(SubtitleLine(
-                id=line_idx,
-                start=round(line_word_timings[0].start, 3),
-                end=round(line_word_timings[-1].end, 3),
-                text=line_text,
-                words=[WordTiming(
-                    word=w.word,
-                    start=round(w.start, 3),
-                    end=round(w.end, 3),
-                ) for w in line_word_timings],
-            ))
-            word_idx += n_words_in_line
-        
-        # If there are leftover word_timings not assigned to any user line,
-        # group them into lines of max 8 words
-        if word_idx < len(word_timings):
-            remaining = word_timings[word_idx:]
-            current_line_words = []
-            for i, wt in enumerate(remaining):
-                should_new_line = False
-                if current_line_words:
-                    gap = wt.start - current_line_words[-1].end
-                    if gap > 0.3:
-                        should_new_line = True
-                    elif len(current_line_words) >= 8:
-                        should_new_line = True
-                    elif any(current_line_words[-1].word.rstrip().endswith(p) for p in ['.', '!', '?', ';', ':', ',']):
-                        should_new_line = True
+            for line_idx, user_line in enumerate(user_lines):
+                line_words_from_text = _tokenize_lyrics(user_line)
+                n_words_in_line = len(line_words_from_text)
                 
-                if should_new_line:
+                if word_idx >= len(word_timings):
+                    break
+                
+                line_word_timings = word_timings[word_idx:word_idx + n_words_in_line]
+                if not line_word_timings:
+                    break
+                
+                line_text = " ".join(w.word for w in line_word_timings)
+                subtitles.append(SubtitleLine(
+                    id=line_idx,
+                    start=round(line_word_timings[0].start, 3),
+                    end=round(line_word_timings[-1].end, 3),
+                    text=line_text,
+                    words=[WordTiming(
+                        word=w.word,
+                        start=round(w.start, 3),
+                        end=round(w.end, 3),
+                    ) for w in line_word_timings],
+                ))
+                word_idx += n_words_in_line
+            
+            # Leftover words
+            if word_idx < len(word_timings):
+                remaining = word_timings[word_idx:]
+                current_line_words = []
+                for i, wt in enumerate(remaining):
+                    should_new_line = False
+                    if current_line_words:
+                        gap = wt.start - current_line_words[-1].end
+                        if gap > 0.4 or len(current_line_words) >= 8:
+                            should_new_line = True
+                    
+                    if should_new_line:
+                        line_text = " ".join(w.word for w in current_line_words)
+                        subtitles.append(SubtitleLine(
+                            id=len(subtitles),
+                            start=round(current_line_words[0].start, 3),
+                            end=round(current_line_words[-1].end, 3),
+                            text=line_text,
+                            words=[WordTiming(word=w.word, start=round(w.start, 3), end=round(w.end, 3)) for w in current_line_words],
+                        ))
+                        current_line_words = []
+                    current_line_words.append(wt)
+                
+                if current_line_words:
                     line_text = " ".join(w.word for w in current_line_words)
                     subtitles.append(SubtitleLine(
                         id=len(subtitles),
@@ -120,11 +136,26 @@ def split_lyrics_word_level(
                         text=line_text,
                         words=[WordTiming(word=w.word, start=round(w.start, 3), end=round(w.end, 3)) for w in current_line_words],
                     ))
-                    current_line_words = []
-                
-                current_line_words.append(wt)
             
+            return subtitles
+        
+        # Counts don't match (e.g. filtered range) — group by gaps
+        subtitles = []
+        current_line_words = []
+        
+        for i, wt in enumerate(word_timings):
+            should_new_line = False
             if current_line_words:
+                gap = wt.start - current_line_words[-1].end
+                if gap > 0.4:  # Natural pause → new line
+                    should_new_line = True
+                elif len(current_line_words) >= 8:  # Max 8 words per line
+                    should_new_line = True
+                # Check if previous word ends with punctuation
+                elif any(current_line_words[-1].word.rstrip().endswith(p) for p in ['.', '!', '?', ';', ':', ',']):
+                    should_new_line = True
+            
+            if should_new_line:
                 line_text = " ".join(w.word for w in current_line_words)
                 subtitles.append(SubtitleLine(
                     id=len(subtitles),
@@ -133,6 +164,19 @@ def split_lyrics_word_level(
                     text=line_text,
                     words=[WordTiming(word=w.word, start=round(w.start, 3), end=round(w.end, 3)) for w in current_line_words],
                 ))
+                current_line_words = []
+            
+            current_line_words.append(wt)
+        
+        if current_line_words:
+            line_text = " ".join(w.word for w in current_line_words)
+            subtitles.append(SubtitleLine(
+                id=len(subtitles),
+                start=round(current_line_words[0].start, 3),
+                end=round(current_line_words[-1].end, 3),
+                text=line_text,
+                words=[WordTiming(word=w.word, start=round(w.start, 3), end=round(w.end, 3)) for w in current_line_words],
+            ))
         
         return subtitles
     

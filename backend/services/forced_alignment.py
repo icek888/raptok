@@ -44,7 +44,14 @@ def align_lyrics_to_timings(
     lyrics_text: str,
     whisper_words: list[dict],
 ) -> list[WordTiming]:
-    """Align user-provided lyrics onto whisper word timings."""
+    """Align user-provided lyrics onto whisper word timings.
+    
+    Strategy:
+    1. Exact count match — direct mapping
+    2. Fuzzy DTW alignment (no count ratio bail-out — handles repeats/ad-libs)
+    3. Position-aware matching (match by position ratio)
+    4. Proportional distribution (last resort)
+    """
     user_words = _tokenize_lyrics(lyrics_text)
     if not user_words or not whisper_words:
         return []
@@ -65,12 +72,22 @@ def align_lyrics_to_timings(
             for i in range(len(user_words))
         ]
 
-    # Strategy 2: DTW alignment
+    # Strategy 2: DTW alignment (no count ratio bail-out)
+    # DTW handles different counts well — it inserts/deletes as needed
     aligned = _dtw_align(user_words, user_norm, whisper_words, whisper_norm)
-    if aligned and len(aligned) >= len(user_words) * 0.5:
+    if aligned and len(aligned) >= len(user_words) * 0.3:
         return aligned
 
-    # Strategy 3: Proportional distribution
+    # Strategy 3: Position-aware matching
+    # Match each user word to the whisper word at the same relative position
+    pos_aligned = _position_align(
+        user_words, user_norm, whisper_words, whisper_norm,
+        whisper_starts, whisper_ends,
+    )
+    if pos_aligned and len(pos_aligned) >= len(user_words) * 0.5:
+        return pos_aligned
+
+    # Strategy 4: Proportional distribution (last resort)
     return _proportional_distribute(
         user_words, whisper_words, whisper_starts, whisper_ends
     )
@@ -82,12 +99,21 @@ def _dtw_align(
     whisper_words: list[dict],
     whisper_norm: list[str],
 ) -> list[WordTiming] | None:
-    """DTW alignment between user words and whisper words."""
+    """DTW alignment between user words and whisper words.
+    
+    No count ratio bail-out — DTW naturally handles different counts
+    by inserting/deleting words. This works well for lyrics vs transcription
+    where whisper may detect extra words (ad-libs, repeats) or miss some.
+    """
     n = len(user_words)
     m = len(whisper_words)
     if n == 0 or m == 0:
         return None
-    if n > m * 2 or m > n * 2:
+
+    # No bail-out based on count ratio — DTW handles it
+    # But cap matrix size for performance (200x300 max)
+    if n > 300 or m > 500:
+        # Too large — use sampling
         return None
 
     INF = float('inf')
@@ -127,6 +153,60 @@ def _dtw_align(
             start=round(whisper_words[w_idx]["start"], 3),
             end=round(whisper_words[w_idx]["end"], 3),
         ))
+    return result
+
+
+def _position_align(
+    user_words: list[str],
+    user_norm: list[str],
+    whisper_words: list[dict],
+    whisper_norm: list[str],
+    whisper_starts: list[float],
+    whisper_ends: list[float],
+) -> list[WordTiming] | None:
+    """Position-aware alignment.
+    
+    Match each user word to the whisper word at the same relative position
+    in the track. Uses fuzzy matching: if words match exactly, use that.
+    Otherwise, use the closest whisper word by position.
+    """
+    n = len(user_words)
+    m = len(whisper_words)
+    if n == 0 or m == 0:
+        return None
+    
+    result = []
+    for i in range(n):
+        # Expected position in whisper words
+        expected_j = int(i * m / n)
+        expected_j = min(expected_j, m - 1)
+        
+        # Search window around expected position (±20% of whisper length)
+        search_radius = max(5, m // 5)
+        search_start = max(0, expected_j - search_radius)
+        search_end = min(m, expected_j + search_radius + 1)
+        
+        # Find best match in window
+        best_j = expected_j
+        best_score = 2  # 0 = exact match, 1 = no match, 2 = initial
+        for j in range(search_start, search_end):
+            if user_norm[i] == whisper_norm[j]:
+                best_j = j
+                best_score = 0
+                break  # Exact match — take it
+            # Fuzzy: partial match (first 3 chars)
+            if len(user_norm[i]) >= 3 and len(whisper_norm[j]) >= 3:
+                if user_norm[i][:3] == whisper_norm[j][:3]:
+                    if best_score > 1:
+                        best_j = j
+                        best_score = 1
+        
+        result.append(WordTiming(
+            word=user_words[i],
+            start=round(whisper_starts[best_j], 3),
+            end=round(whisper_ends[best_j], 3),
+        ))
+    
     return result
 
 
