@@ -183,6 +183,65 @@ export const api = {
     return postForm(`${API_BASE}/transcribe-full`, form);
   },
 
+  // SSE streaming transcription with progress updates
+  transcribeFullStream: (
+    audioPath: string,
+    language: string = 'en',
+    lyrics?: string,
+    modelSize: string = '',
+    onProgress?: (data: { step: string; label: string; progress: number; elapsed?: number }) => void,
+  ): Promise<TranscribeResult & { total_duration?: number; bpm?: number }> => {
+    return new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('audio_path', audioPath);
+      form.append('language', language);
+      if (lyrics) form.append('lyrics', lyrics);
+      if (modelSize) form.append('model_size', modelSize);
+
+      // Use fetch with streaming response
+      fetch(`${API_BASE}/transcribe-full-stream`, { method: 'POST', body: form })
+        .then(async (res) => {
+          const reader = res.body?.getReader();
+          if (!reader) { reject(new Error('No response body')); return; }
+          
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let finalResult: any = null;
+          
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            
+            // Parse SSE events
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.step === 'done') {
+                    finalResult = data.result;
+                    onProgress?.(data);
+                  } else if (data.step === 'error') {
+                    reject(new Error(data.label));
+                    return;
+                  } else {
+                    onProgress?.(data);
+                  }
+                } catch {}
+              }
+            }
+          }
+          
+          if (finalResult) resolve(finalResult);
+          else reject(new Error('No result received'));
+        })
+        .catch(reject);
+    });
+  },
+
   downloadUrl: (filename: string) => `${API_BASE}/download/${filename}`,
   thumbnailUrl: (filename: string) => `${API_BASE}/thumbnail/${filename}`,
 };

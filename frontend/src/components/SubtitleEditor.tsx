@@ -153,33 +153,35 @@ export function SubtitleEditor({
   }, []);
 
   // ── Transcribe ENTIRE track once + filter by range locally ──
+  const [transcribeStatus, setTranscribeStatus] = useState<{ label: string; progress: number; elapsed?: number } | null>(null);
+
   const handleTranscribe = async () => {
     if (!audioPath) return;
     setTranscribing(true);
+    setTranscribeStatus({ label: 'Starting...', progress: 0 });
     try {
-      // Transcribe the FULL audio track (not just the fragment)
-      const result = await api.transcribeFull(audioPath, transcribeLang, lyrics, whisperModel);
+      const result = await api.transcribeFullStream(
+        audioPath, transcribeLang, lyrics, whisperModel,
+        (data) => setTranscribeStatus({ label: data.label, progress: data.progress, elapsed: data.elapsed }),
+      );
       
-      // Store absolute word timings for the entire track
       setFullTrackWords(result.words);
       setHasFullTranscription(true);
       
-      // Filter words to the selected range and convert to video-relative timestamps
       const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
       onWordTimingsChange(filtered);
       
-      // Generate subtitles from filtered word timings
       const subResult = await api.wordSplitSubtitles(
         lyrics || result.text, fragments, filtered, 0,
       );
       onSubtitlesChange(subResult.subtitles);
       
-      // Auto-open Edit Words panel after transcription
       setShowWordEditor(true);
     } catch (e) {
       console.error('Transcribe failed:', e);
     } finally {
       setTranscribing(false);
+      setTranscribeStatus(null);
     }
   };
 
@@ -676,7 +678,31 @@ export function SubtitleEditor({
             audioStart={audioStart}
             audioEnd={audioEnd}
             onRangeChange={handleRangeChange}
-            onWordTimingsChange={onWordTimingsChange}
+            onWordTimingsChange={(timings) => {
+              onWordTimingsChange(timings);
+              // Live regen subtitles from timeline edits too
+              if (lyrics && fragments.length > 0) {
+                api.wordSplitSubtitles(lyrics, fragments, timings, 0)
+                  .then(r => onSubtitlesChange(r.subtitles))
+                  .catch(() => {});
+              } else if (fragments.length > 0) {
+                // No lyrics — rebuild from words directly
+                const lines: SubtitleLine[] = [];
+                let cur: WordTiming[] = [];
+                for (const w of timings) {
+                  if (cur.length > 0) {
+                    const gap = w.start - cur[cur.length - 1].end;
+                    if (gap > 0.4 || cur.length >= 8) {
+                      lines.push({ id: lines.length, start: cur[0].start, end: cur[cur.length - 1].end, text: cur.map(x => x.word).join(' '), words: cur });
+                      cur = [];
+                    }
+                  }
+                  cur.push(w);
+                }
+                if (cur.length > 0) lines.push({ id: lines.length, start: cur[0].start, end: cur[cur.length - 1].end, text: cur.map(x => x.word).join(' '), words: cur });
+                onSubtitlesChange(lines);
+              }
+            }}
             onSeek={seekTo}
             currentTime={playTime}
             isPlaying={isPlaying}
@@ -724,6 +750,35 @@ export function SubtitleEditor({
             {hasFullTranscription && (
               <span className="text-xs text-blue-400">📜 Full track — drag yellow slider to filter</span>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Transcription progress bar ── */}
+      {transcribing && transcribeStatus && (
+        <div className="bg-purple-500/5 border border-purple-500/20 rounded-xl p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin text-purple-400" />
+            <span className="text-xs text-purple-300 font-medium">{transcribeStatus.label}</span>
+            {transcribeStatus.elapsed != null && (
+              <span className="text-[10px] text-gray-500 ml-auto font-mono">
+                {transcribeStatus.elapsed}s elapsed
+              </span>
+            )}
+          </div>
+          <div className="relative h-2 bg-[#0a0a0f] rounded-full overflow-hidden">
+            <div
+              className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${transcribeStatus.progress}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-gray-500">
+            <span>{transcribeStatus.progress}%</span>
+            <span>
+              {transcribeStatus.progress > 0 && transcribeStatus.elapsed != null
+                ? `~ETA ${Math.round((transcribeStatus.elapsed / transcribeStatus.progress) * (100 - transcribeStatus.progress))}s`
+                : 'Calculating...'}
+            </span>
           </div>
         </div>
       )}

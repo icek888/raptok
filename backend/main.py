@@ -4,7 +4,7 @@ import shutil
 import logging
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import TEMP_DIR, OUTPUT_DIR
@@ -161,21 +161,27 @@ async def api_render(req: RenderRequest):
             tmpl = next((t for t in TEMPLATES if t.id == req.template_id), None)
             if tmpl:
                 template_dict = tmpl.model_dump()
-                # ── Override style + display_mode from template ──
+                # ── Merge template style with user customizations ──
+                # Template provides defaults, but user overrides are preserved
+                # for any field that differs from the template's default
+                user_style = req.style
                 req.style = SubtitleStyle(
-                    font=tmpl.font,
-                    size=tmpl.size,
-                    primary_color=tmpl.primary_color,
-                    active_color=tmpl.active_color,
-                    outline_color=tmpl.outline_color,
-                    outline_width=tmpl.outline_width,
-                    position=tmpl.position,
-                    margin_v=tmpl.margin_v,
-                    bold=tmpl.bold,
+                    font=user_style.font if user_style.font != "Arial" else tmpl.font,
+                    size=user_style.size if user_style.size != 72 else tmpl.size,
+                    primary_color=user_style.primary_color if user_style.primary_color != "&H00FFFFFF" else tmpl.primary_color,
+                    active_color=user_style.active_color if user_style.active_color != "&H00D7FF" else tmpl.active_color,
+                    outline_color=user_style.outline_color if user_style.outline_color != "&H00000000" else tmpl.outline_color,
+                    outline_width=user_style.outline_width if user_style.outline_width != 4 else tmpl.outline_width,
+                    position=user_style.position if user_style.position != "bottom" else tmpl.position,
+                    margin_v=user_style.margin_v if user_style.margin_v != 80 else tmpl.margin_v,
+                    bold=user_style.bold if user_style.bold != True else tmpl.bold,
                 )
-                req.display_mode = tmpl.display_mode
-                req.karaoke = tmpl.karaoke
-                logger.info(f"Template applied: {tmpl.name} — font={tmpl.font}, size={tmpl.size}, mode={tmpl.display_mode}, video_mode={tmpl.video_mode}")
+                # Only override display_mode/karaoke if user hasn't explicitly set them
+                if req.display_mode == "line_highlight":
+                    req.display_mode = tmpl.display_mode
+                if not req.karaoke:
+                    req.karaoke = tmpl.karaoke
+                logger.info(f"Template applied (merged): {tmpl.name} — font={req.style.font}, size={req.style.size}, color={req.style.active_color}, mode={req.display_mode}")
             else:
                 logger.warning(f"Template not found: {req.template_id}")
         
@@ -424,6 +430,104 @@ async def api_transcribe(req: TranscribeRequest):
 
 
 # ─── Full transcription (transcribe entire audio once) ───
+
+@app.post("/api/transcribe-full-stream")
+async def api_transcribe_full_stream(
+    audio_path: str = Form(...),
+    language: str = Form("en"),
+    lyrics: str = Form(""),
+    model_size: str = Form(""),
+):
+    """Transcribe with SSE progress updates — same as transcribe-full but streams status."""
+    import json
+    import asyncio
+    import time
+
+    async def generate():
+        try:
+            from services.speech_recognizer import transcribe_audio
+            from services.forced_alignment import align_lyrics_to_timings
+            from services.bpm_detector import detect_bpm
+            from services.stem_separator import separate_vocals
+
+            t0 = time.time()
+            def elapsed():
+                return round(time.time() - t0, 1)
+
+            # Step 1: Stem separation (~65s)
+            yield f"data: {json.dumps({'step': 'separation', 'label': 'Separating vocals from music...', 'progress': 5, 'elapsed': elapsed()})}\n\n"
+
+            try:
+                vocal_path = await separate_vocals(audio_path, method="auto")
+                whisper_input = vocal_path
+                yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocals isolated ✓', 'progress': 25, 'elapsed': elapsed()})}\n\n"
+            except Exception as e:
+                logger.warning(f"Stem separation failed ({e}), using original audio")
+                whisper_input = audio_path
+                yield f"data: {json.dumps({'step': 'separation', 'label': 'Using original audio (separation skipped)', 'progress': 25, 'elapsed': elapsed()})}\n\n"
+
+            # Step 2: WhisperX transcription (~48s)
+            model_label = model_size or "small"
+            yield f"data: {json.dumps({'step': 'transcription', 'label': f'WhisperX transcribing ({model_label})...', 'progress': 30, 'elapsed': elapsed()})}\n\n"
+
+            # Run whisper in a thread to not block event loop
+            loop = asyncio.get_event_loop()
+            whisper_result = await loop.run_in_executor(
+                None,
+                lambda: transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size)
+            )
+
+            whisper_words = whisper_result.get("words", [])
+            yield f"data: {json.dumps({'step': 'transcription', 'label': f'Transcribed {len(whisper_words)} words ✓', 'progress': 70, 'elapsed': elapsed()})}\n\n"
+
+            user_lyrics = lyrics.strip() if lyrics else ""
+
+            # Step 3: Alignment / DTW
+            if user_lyrics:
+                yield f"data: {json.dumps({'step': 'alignment', 'label': 'Aligning lyrics to audio...', 'progress': 75, 'elapsed': elapsed()})}\n\n"
+
+                try:
+                    bpm_result = detect_bpm(audio_path)
+                    full_bpm = bpm_result.get("bpm", 0.0)
+                    full_beats = bpm_result.get("beats", [])
+                except Exception:
+                    full_bpm = 0.0
+                    full_beats = []
+
+                import librosa
+                full_duration = librosa.get_duration(path=audio_path)
+
+                word_timings = align_lyrics_to_timings(user_lyrics, whisper_words)
+
+                yield f"data: {json.dumps({'step': 'alignment', 'label': f'Aligned {len(word_timings)} words ✓', 'progress': 95, 'elapsed': elapsed()})}\n\n"
+
+                result = {
+                    "text": user_lyrics,
+                    "words": [w.model_dump() if hasattr(w, 'model_dump') else w for w in word_timings],
+                    "language": whisper_result.get("language", "unknown"),
+                    "method": "whisperx_alignment",
+                    "whisper_words": len(whisper_words),
+                    "aligned_words": len(word_timings),
+                    "bpm": full_bpm,
+                    "total_duration": round(full_duration, 2),
+                }
+            else:
+                yield f"data: {json.dumps({'step': 'alignment', 'label': 'Finalizing timestamps...', 'progress': 95, 'elapsed': elapsed()})}\n\n"
+                result = {
+                    "text": whisper_result.get("text", ""),
+                    "words": whisper_words,
+                    "language": whisper_result.get("language", "unknown"),
+                    "method": "whisperx_only",
+                }
+
+            yield f"data: {json.dumps({'step': 'done', 'label': 'Complete ✓', 'progress': 100, 'elapsed': elapsed(), 'result': result})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Transcribe stream error: {e}")
+            yield f"data: {json.dumps({'step': 'error', 'label': str(e), 'progress': 0})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
 
 @app.post("/api/transcribe-full")
 async def api_transcribe_full(
