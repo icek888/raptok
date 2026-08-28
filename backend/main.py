@@ -313,17 +313,12 @@ async def prepare_preview(req: PreparePreviewRequest):
             inputs.extend(["-ss", str(frag.start), "-t", str(frag.duration)])
             filter_parts.append(f"[{i}:v]")
 
-        # Use stream copy for speed (no re-encode)
-        # Build concat demuxer file
+        # Use ffmpeg concat demuxer with inpoint/outpoint (ffmpeg 7.x syntax)
         concat_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
         for frag in fragments:
             concat_file.write(f"file '{req.video_path}'\n")
-            concat_file.write(f"ss {frag.start}\n")
-            concat_file.write(f"duration {frag.duration}\n")
-        # Repeat last entry (ffmpeg concat demuxer requirement)
-        last_frag = fragments[-1]
-        concat_file.write(f"file '{req.video_path}'\n")
-        concat_file.write(f"ss {last_frag.start}\n")
+            concat_file.write(f"inpoint {frag.start}\n")
+            concat_file.write(f"outpoint {frag.start + frag.duration}\n")
         concat_file.close()
 
         preview_video = TEMP_DIR / f"{job_id}.mp4"
