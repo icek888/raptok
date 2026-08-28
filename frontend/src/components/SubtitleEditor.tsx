@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, RenderTemplate } from '../types';
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
+import { TrackAnalysisPanel } from './TrackAnalysisPanel';
 
 // Colors for word chips — cycle through lines
 const WORD_COLORS = [
@@ -710,6 +711,7 @@ export function SubtitleEditor({
               </span>
             )}
           </div>
+          <TrackAnalysisPanel audioPath={audioPath!} onHookSeek={seekTo} />
           <TimelinePreview
             fragments={fragments}
             subtitles={subtitles}

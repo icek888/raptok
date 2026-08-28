@@ -1,6 +1,6 @@
 import type { 
   VideoInfo, Fragment, FragmentSelection, SubtitleLine, SubtitleStyle, 
-  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate
+  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate, TrackAnalysis
 } from '../types';
 
 const API_BASE = '/api';
@@ -144,6 +144,10 @@ export const api = {
   // ─── New: Audio Info (duration, waveform, BPM) ───
   audioInfo: (audioPath: string): Promise<AudioInfo> =>
     postJSON(`${API_BASE}/audio-info`, { audio_path: audioPath }),
+
+  // ─── Deep Track Analysis (mood, energy, genre, hook) ───
+  trackAnalysis: (audioPath: string): Promise<TrackAnalysis> =>
+    postJSON(`${API_BASE}/track-analysis`, { audio_path: audioPath }),
 
   // ─── New: Transcribe fragment (with start/end selection + forced alignment) ───
   transcribeFragment: (

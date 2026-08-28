@@ -23,6 +23,7 @@ from services.subtitle_generator import split_lyrics, split_lyrics_word_level, g
 from services.video_renderer import render_clip
 from services.bpm_detector import detect_bpm, get_beat_aligned_starts
 from services.speech_recognizer import transcribe_to_lyrics
+from services.audio_analyzer import analyze_track
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -337,6 +338,18 @@ async def api_audio_info(req: BPMRequest):
             "rms_times": [round(t, 3) for t in rms_times[::50]],  # downsample
             "rms_values": [round(float(v), 4) for v in rms[::50]],
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Deep Track Analysis (mood, energy, genre, hook) ───
+
+@app.post("/api/track-analysis")
+async def api_track_analysis(req: BPMRequest):
+    """Deep audio analysis: mood, energy profile, genre hint, hook detection."""
+    try:
+        result = analyze_track(req.audio_path)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

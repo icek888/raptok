@@ -124,3 +124,53 @@ export interface RenderTemplate {
   dark_overlay: number;
   scale_factor: number;
 }
+
+// ─── Deep Track Analysis ───
+
+export interface MoodScores {
+  energy: number;
+  valence: number;
+  aggressiveness: number;
+  brightness: number;
+  danceability: number;
+}
+
+export interface EnergySegment {
+  start: number;
+  end: number;
+  energy: number;
+  label: 'peak' | 'high' | 'mid' | 'low';
+}
+
+export interface SongSection {
+  start: number;
+  end: number;
+  energy: number;
+  label: string;  // intro, verse, chorus, hook, break, outro
+}
+
+export interface TrackAnalysis {
+  duration: number;
+  bpm: number;
+  key: string;
+  key_confidence: number;
+  mood: string;
+  mood_emoji: string;
+  mood_color: string;
+  mood_description: string;
+  mood_scores: MoodScores;
+  energy_profile: EnergySegment[];
+  energy_curve: number[];
+  energy_times: number[];
+  hook_time: number;
+  hook_score: number;
+  genre_hint: string;
+  spectral_features: {
+    centroid: number;
+    rolloff: number;
+    zcr: number;
+    bass_ratio: number;
+    contrast_mean: number;
+  };
+  sections: SongSection[];
+}
