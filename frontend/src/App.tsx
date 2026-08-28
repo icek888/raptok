@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import { Film, Scissors, Type, Wand2, Music } from 'lucide-react';
+import { Film, Scissors, Type, Wand2, Music, Eye } from 'lucide-react';
 import { InputPanel } from './components/InputPanel';
 import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
+import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
 import { defaultStyle } from './api/client';
 import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult } from './types';
 
-type Step = 0 | 1 | 2 | 3;
+type Step = 0 | 1 | 2 | 3 | 4;
 
 const STEPS = [
   { id: 0 as Step, label: 'Input', icon: Film },
   { id: 1 as Step, label: 'Fragments', icon: Scissors },
   { id: 2 as Step, label: 'Subtitles', icon: Type },
-  { id: 3 as Step, label: 'Render', icon: Wand2 },
+  { id: 3 as Step, label: 'Preview', icon: Eye },
+  { id: 4 as Step, label: 'Render', icon: Wand2 },
 ];
 
 function App() {
@@ -37,8 +39,9 @@ function App() {
     switch (s) {
       case 0: return !!videoInfo;
       case 1: return fragments.length >= 3;
-      case 2: return subtitles.length > 0;
+      case 2: return subtitles.length > 0 || wordTimings.length > 0;
       case 3: return true;
+      case 4: return true;
       default: return true;
     }
   };
@@ -162,7 +165,28 @@ function App() {
             />
           </div>
 
-          {step === 3 && (
+          {/* Step 3: Video Preview Editor — also keep mounted */}
+          <div style={{ display: step === 3 ? 'block' : 'none' }}>
+            <VideoPreviewEditor
+              videoInfo={videoInfo}
+              videoUrl={videoInfo?.local_path || null}
+              fragments={fragments}
+              audioPath={audioPath}
+              audioStart={audioStart}
+              subtitles={subtitles}
+              wordTimings={wordTimings}
+              style={style}
+              onStyleChange={setStyle}
+              karaoke={karaoke}
+              onKaraokeChange={setKaraoke}
+              displayMode={displayMode}
+              onDisplayModeChange={setDisplayMode}
+              templateId={templateId}
+              onTemplateChange={setTemplateId}
+            />
+          </div>
+
+          {step === 4 && (
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
@@ -179,7 +203,7 @@ function App() {
         </div>
 
         {/* Navigation */}
-        {step < 3 && (
+        {step < 4 && (
           <div className="flex justify-between mt-4">
             <button
               onClick={() => setStep(Math.max(0, step - 1) as Step)}
@@ -189,7 +213,7 @@ function App() {
               ← Back
             </button>
             <button
-              onClick={() => canProceed(step) && setStep(Math.min(3, step + 1) as Step)}
+              onClick={() => canProceed(step) && setStep(Math.min(4, step + 1) as Step)}
               disabled={!canProceed(step)}
               className="px-6 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-30"
             >
