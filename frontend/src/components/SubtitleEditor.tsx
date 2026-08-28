@@ -633,55 +633,6 @@ export function SubtitleEditor({
           <Sparkles size={14} />
           Karaoke {karaoke ? 'ON' : 'OFF'}
         </button>
-
-        {/* Display mode buttons */}
-        {karaoke && (
-          <div className="space-y-1.5">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Display Mode</label>
-            <div className="grid grid-cols-2 gap-1">
-              <button
-                onClick={() => onDisplayModeChange('auto')}
-                className={`px-2 py-1.5 text-xs rounded transition ${
-                  displayMode === 'auto'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                🤖 Auto
-              </button>
-              <button
-                onClick={() => onDisplayModeChange('line_highlight')}
-                className={`px-2 py-1.5 text-xs rounded transition ${
-                  displayMode === 'line_highlight'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                📝 Line
-              </button>
-              <button
-                onClick={() => onDisplayModeChange('word_by_word')}
-                className={`px-2 py-1.5 text-xs rounded transition ${
-                  displayMode === 'word_by_word'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                ✨ Word
-              </button>
-              <button
-                onClick={() => onDisplayModeChange('single_word')}
-                className={`px-2 py-1.5 text-xs rounded transition ${
-                  displayMode === 'single_word'
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-[#0a0a0f] border border-[#1a1a2a] text-gray-400 hover:text-gray-200'
-                }`}
-              >
-                🔤 Single
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1016,76 +967,13 @@ export function SubtitleEditor({
         </div>
       )}
 
-      {/* ── Subtitle Lines ── */}
-      {subtitles.length > 0 && (
-        <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-2">
-          {subtitles.map(sub => {
-            const isActive = playTime - audioStart >= sub.start && playTime - audioStart <= sub.end;
-            return (
-              <div
-                key={sub.id}
-                className={`flex items-start gap-2 rounded-lg p-2 border transition ${
-                  isActive
-                    ? 'bg-yellow-500/10 border-yellow-500/30'
-                    : 'bg-[#0f0f17] border-[#1a1a2a] hover:border-purple-500/20'
-                }`}
-              >
-                <div className="text-xs text-gray-500 font-mono pt-1 w-5">#{sub.id + 1}</div>
-                <div className="flex flex-col gap-0.5 w-20">
-                  <input
-                    type="number" step="0.1"
-                    value={sub.start}
-                    onChange={e => onSubtitlesChange(subtitles.map(s => s.id === sub.id ? { ...s, start: parseFloat(e.target.value) || 0 } : s))}
-                    className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-[10px] text-gray-300 font-mono"
-                  />
-                  <input
-                    type="number" step="0.1"
-                    value={sub.end}
-                    onChange={e => onSubtitlesChange(subtitles.map(s => s.id === sub.id ? { ...s, end: parseFloat(e.target.value) || 0 } : s))}
-                    className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-1 py-0.5 text-[10px] text-gray-300 font-mono"
-                  />
-                </div>
-                <div className="flex-1">
-                  <input
-                    type="text"
-                    value={sub.text}
-                    onChange={e => onSubtitlesChange(subtitles.map(s => s.id === sub.id ? { ...s, text: e.target.value } : s))}
-                    className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1 text-sm text-gray-100"
-                  />
-                  {sub.words && sub.words.length > 0 && (
-                    <div className="flex flex-wrap gap-0.5 mt-1">
-                      {sub.words.map((w, i) => {
-                        const wActive = playTime - audioStart >= w.start && playTime - audioStart <= w.end;
-                        return (
-                          <span
-                            key={i}
-                            className={`text-[10px] px-1.5 py-0.5 rounded font-mono cursor-pointer transition ${
-                              wActive
-                                ? 'bg-yellow-500 text-black'
-                                : 'bg-purple-500/10 text-purple-300 hover:bg-purple-500/20'
-                            }`}
-                            onClick={() => seekTo(w.start + audioStart)}
-                            title={`${w.start.toFixed(2)}s - ${w.end.toFixed(2)}s`}
-                          >
-                            {w.word}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {subtitles.length === 0 && (
+      {/* ── Edit Words is the only way to view/edit subtitles now ── */}
+      {subtitles.length === 0 && wordTimings.length === 0 && (
         <div className="text-center py-8 text-gray-500 text-sm">
           {audioPath
             ? (hasFullTranscription
-                ? '✅ Full track transcribed — drag range sliders to filter words instantly'
-                : 'Select audio range → click "Transcribe & Align" — recognizes FULL track, then filters by range')
+                ? '✅ Full track transcribed — drag yellow slider to filter words'
+                : 'Click "Transcribe & Align" — recognizes FULL track, then filters by range')
             : 'Upload audio → paste lyrics → Transcribe & Align (full track)'}
         </div>
       )}
