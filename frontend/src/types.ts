@@ -113,16 +113,27 @@ export interface RenderTemplate {
   id: string;
   name: string;
   description: string;
+  // Subtitle style
   font: string;
   size: number;
   primary_color: string;
   active_color: string;
+  outline_color: string;
+  outline_width: number;
   position: string;
+  margin_v: number;
+  bold: boolean;
+  // Display
   display_mode: string;
+  karaoke: boolean;
+  // Video rendering
   video_mode: string;
   blur_sigma: number;
   dark_overlay: number;
   scale_factor: number;
+  active_scale?: number;
+  glow_border?: number;
+  fade_in?: number;
 }
 
 // ─── Deep Track Analysis ───

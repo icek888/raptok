@@ -77,15 +77,18 @@ export function SubtitleEditor({
     }
   }, [fragments, videoUrl]);
 
-  // ── Apply template to style ──
+  // ── Apply template to style (ALL fields) ──
   const applyTemplate = (tmpl: RenderTemplate) => {
     onStyleChange({
-      ...style,
       font: tmpl.font,
       size: tmpl.size,
       primary_color: tmpl.primary_color,
       active_color: tmpl.active_color,
+      outline_color: tmpl.outline_color,
+      outline_width: tmpl.outline_width,
       position: tmpl.position as 'bottom' | 'center' | 'top',
+      margin_v: tmpl.margin_v,
+      bold: tmpl.bold,
     });
     onDisplayModeChange(tmpl.display_mode as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word');
     onTemplateChange?.(tmpl.id);

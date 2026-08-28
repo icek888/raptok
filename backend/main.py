@@ -154,34 +154,23 @@ async def api_render(req: RenderRequest):
         fragments = [Fragment(**f) if isinstance(f, dict) else f for f in req.fragments]
         subtitles = [SubtitleLine(**s) if isinstance(s, dict) else s for s in req.subtitles]
         
-        # Resolve template if provided
+        # Resolve template if provided — use template for VIDEO rendering params only
+        # (blur, dark_overlay, scale_factor, glow, fade). Subtitle STYLE (font, color,
+        # size, position) comes entirely from req.style — the frontend already applies
+        # template defaults to style state, and user overrides on top. So backend just
+        # uses the style as-is.
         template_dict = None
         if req.template_id:
             from models.schemas import TEMPLATES
             tmpl = next((t for t in TEMPLATES if t.id == req.template_id), None)
             if tmpl:
                 template_dict = tmpl.model_dump()
-                # ── Merge template style with user customizations ──
-                # Template provides defaults, but user overrides are preserved
-                # for any field that differs from the template's default
-                user_style = req.style
-                req.style = SubtitleStyle(
-                    font=user_style.font if user_style.font != "Arial" else tmpl.font,
-                    size=user_style.size if user_style.size != 72 else tmpl.size,
-                    primary_color=user_style.primary_color if user_style.primary_color != "&H00FFFFFF" else tmpl.primary_color,
-                    active_color=user_style.active_color if user_style.active_color != "&H00D7FF" else tmpl.active_color,
-                    outline_color=user_style.outline_color if user_style.outline_color != "&H00000000" else tmpl.outline_color,
-                    outline_width=user_style.outline_width if user_style.outline_width != 4 else tmpl.outline_width,
-                    position=user_style.position if user_style.position != "bottom" else tmpl.position,
-                    margin_v=user_style.margin_v if user_style.margin_v != 80 else tmpl.margin_v,
-                    bold=user_style.bold if user_style.bold != True else tmpl.bold,
-                )
                 # Only override display_mode/karaoke if user hasn't explicitly set them
                 if req.display_mode == "line_highlight":
                     req.display_mode = tmpl.display_mode
                 if not req.karaoke:
                     req.karaoke = tmpl.karaoke
-                logger.info(f"Template applied (merged): {tmpl.name} — font={req.style.font}, size={req.style.size}, color={req.style.active_color}, mode={req.display_mode}")
+                logger.info(f"Template video params: {tmpl.name} — font={req.style.font}, size={req.style.size}, color={req.style.active_color}, blur={tmpl.blur_sigma}, mode={req.display_mode}")
             else:
                 logger.warning(f"Template not found: {req.template_id}")
         
