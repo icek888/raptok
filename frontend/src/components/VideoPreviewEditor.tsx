@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Type, Palette, Layout, Eye, Film, Loader2 } from 'lucide-react';
-import type { SubtitleLine, SubtitleStyle, WordTiming, Fragment, RenderTemplate, VideoInfo, PreviewResult } from '../types';
+import type { SubtitleLine, SubtitleStyle, WordTiming, Fragment, RenderTemplate, VideoInfo } from '../types';
 import { assToCss, cssToAss } from '../utils/colors';
 import { POSITION_MAP } from '../utils/constants';
 import { useTemplates, applyTemplateToStyle } from '../utils/templates';
-import { api } from '../api/client';
 
 interface Props {
   videoInfo: VideoInfo | null;
@@ -43,36 +42,67 @@ export function VideoPreviewEditor({
   const [activeTab, setActiveTab] = useState<'templates' | 'style' | 'layout'>('templates');
 
   // ── Preview clip state ──
-  const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+  const [previewData, setPreviewData] = useState<{
+    video_url: string;
+    audio_url: string | null;
+    duration: number;
+    word_timings: WordTiming[];
+    subtitles: SubtitleLine[];
+    fragments: { id: number; start: number; end: number; duration: number }[];
+  } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   // ── Prepare preview clip when entering Step 3 ──
+  // Backend concats selected video fragments + audio fragments into one clip.
+  // Word timings and subtitles are shifted to 0-based relative to the concat clip.
   useEffect(() => {
     if (!videoUrl || fragments.length === 0 || previewData) return;
+    if (wordTimings.length === 0 && subtitles.length === 0) return;
+
     setPreparing(true);
     setPreviewError(null);
-    api.preparePreview(
-      videoUrl,
-      fragments,
-      audioPath,
-      audioStart,
-      wordTimings,
-      subtitles,
-    ).then(data => {
+
+    // Call backend to concat fragments + shift timings
+    fetch('/api/prepare-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_path: videoUrl,
+        audio_path: audioPath || null,
+        audio_start: audioStart,
+        fragments: fragments.map(f => ({
+          id: f.id,
+          start: f.start,
+          end: f.end,
+          duration: f.duration,
+        })),
+        word_timings: wordTimings,
+        subtitles: subtitles,
+      }),
+    }).then(r => r.json()).then(data => {
       setPreviewData(data);
       setPreparing(false);
+      console.log('[Preview] Concat data:', {
+        subs: data.subtitles?.length || 0,
+        words: data.word_timings?.length || 0,
+        duration: data.duration,
+        video: data.video_url,
+        audio: data.audio_url,
+      });
     }).catch(err => {
       setPreviewError(err instanceof Error ? err.message : 'Failed to prepare preview');
       setPreparing(false);
     });
-  }, [videoUrl, fragments.length]); // intentionally not depending on wordTimings/subtitles to avoid re-extracting on edits
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoUrl, fragments.length, wordTimings.length, subtitles.length]);
 
   // Templates loaded via useTemplates() hook (cached)
 
   // ── Time update ──
   const onTimeUpdate = useCallback(() => {
     if (videoRef.current) {
+      // Concat clip is 0-based, word_timings/subtitles are 0-based — direct match
       setCurrentTime(videoRef.current.currentTime);
     }
   }, []);
@@ -85,6 +115,7 @@ export function VideoPreviewEditor({
     } else {
       videoRef.current.play();
       if (audioRef.current) {
+        // Both video and audio are 0-based concat clips — same timeline
         audioRef.current.currentTime = videoRef.current.currentTime;
         audioRef.current.play();
       }
@@ -101,7 +132,8 @@ export function VideoPreviewEditor({
   // ── Use preview clip data if available, fall back to raw ──
   const activeVideoUrl = previewData?.video_url || null;
   const activeAudioUrl = previewData?.audio_url || null;
-  const previewDuration = previewData?.duration || 0;
+  // Duration: video duration minus audioStart (since we seek to audioStart)
+  const previewDuration = previewData?.duration || duration;
   const previewSubs = previewData?.subtitles || subtitles;
   const previewWords = previewData?.word_timings || wordTimings;
   const previewFragments = previewData?.fragments || fragments;
@@ -112,6 +144,22 @@ export function VideoPreviewEditor({
   // ── Find active subtitle at current time ──
   const activeSub = previewSubs.find(s => currentTime >= s.start && currentTime <= s.end);
   const activeWord = previewWords.find(w => currentTime >= w.start && currentTime <= w.end);
+
+  // DEBUG: log preview data state
+  console.log('[Preview Debug]', {
+    currentTime: currentTime.toFixed(2),
+    isPlaying,
+    duration,
+    previewDuration,
+    previewSubsCount: previewSubs.length,
+    previewWordsCount: previewWords.length,
+    activeSub: activeSub ? `${activeSub.start}-${activeSub.end} "${activeSub.text}"` : 'NONE',
+    activeWord: activeWord ? `${activeWord.start}-${activeWord.end} "${activeWord.word}"` : 'NONE',
+    displayMode,
+    hasPreviewData: !!previewData,
+    previewDataSubs: previewData?.subtitles?.length || 0,
+    previewDataWords: previewData?.word_timings?.length || 0,
+  });
 
   // ── Apply template (shared utility) ──
   const applyTemplate = (tmpl: RenderTemplate) => {
@@ -515,7 +563,8 @@ export function VideoPreviewEditor({
               <SkipForward size={18} />
             </button>
             <span className="text-xs text-gray-400 font-mono ml-2">
-              {currentTime.toFixed(1)}s / {duration.toFixed(1)}s
+              {/* Time: 0-based relative to audio_start */}
+              {currentTime.toFixed(1)}s / {previewDuration.toFixed(1)}s
             </span>
           </div>
 

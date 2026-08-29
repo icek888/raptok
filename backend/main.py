@@ -343,21 +343,31 @@ async def prepare_preview(req: PreparePreviewRequest):
 
         os.unlink(concat_file.name)
 
-        # ── 2. Extract audio segment (from audio_path, offset by audio_start) ──
+        # ── 2. Concat audio fragments (same fragments, offset by audio_start) ──
+        # Audio file is the full song. Fragments are absolute (relative to source video).
+        # Audio corresponds to video, so audio fragment = video fragment (same timeline).
+        # We use the same inpoint/outpoint but on the audio file.
         preview_audio = None
         if req.audio_path:
-            total_dur = sum(f.duration for f in fragments)
-            audio_start = req.audio_start or 0
+            audio_offset = req.audio_start or 0.0
+            audio_concat_file = tempfile.NamedTemporaryFile(mode="w", suffix="_audio.txt", delete=False)
+            for frag in fragments:
+                # Audio fragment: same time range as video fragment (both from same source)
+                audio_concat_file.write(f"file '{req.audio_path}'\n")
+                audio_concat_file.write(f"inpoint {frag.start}\n")
+                audio_concat_file.write(f"outpoint {frag.start + frag.duration}\n")
+            audio_concat_file.close()
+
             preview_audio = TEMP_DIR / f"{job_id}_audio.mp3"
             result = subprocess.run([
-                "ffmpeg", "-y",
-                "-ss", str(audio_start), "-t", str(total_dur),
-                "-i", req.audio_path,
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", audio_concat_file.name,
                 "-ac", "2", "-ab", "128k",
                 str(preview_audio)
             ], capture_output=True, timeout=120)
             if result.returncode != 0:
                 preview_audio = None  # audio optional
+            os.unlink(audio_concat_file.name)
 
         # ── 3. Shift word timings to be 0-based (relative to concat clip) ──
         # word_timings from frontend are 0-based relative to audio_start (already shifted
@@ -412,6 +422,17 @@ async def prepare_preview(req: PreparePreviewRequest):
             current_offset += frag.duration
 
         total_duration = sum(f.duration for f in fragments)
+
+        print(f"[prepare-preview] fragments={len(fragments)} audio_offset={audio_offset}")
+        print(f"[prepare-preview] word_timings IN={len(req.word_timings or [])} OUT={len(shifted_timings)}")
+        print(f"[prepare-preview] subtitles IN={len(req.subtitles or [])} OUT={len(shifted_subs)}")
+        if shifted_timings:
+            print(f"[prepare-preview] first word: {shifted_timings[0]}")
+        if shifted_subs:
+            print(f"[prepare-preview] first sub: {shifted_subs[0].get('start')}-{shifted_subs[0].get('end')} '{shifted_subs[0].get('text','')}'")
+        # Show all fragments with their relative ranges
+        for i, frag in enumerate(fragments):
+            print(f"[prepare-preview] frag #{i}: abs[{frag.start}-{frag.end}] rel[{frag.start - audio_offset:.1f}-{frag.end - audio_offset:.1f}] dur={frag.duration}")
 
         return {
             "video_url": f"/api/video/{preview_video.name}",
