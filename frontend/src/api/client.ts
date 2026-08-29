@@ -241,6 +241,27 @@ export const api = {
 
   downloadUrl: (filename: string) => `${API_BASE}/download/${filename}`,
   thumbnailUrl: (filename: string) => `${API_BASE}/thumbnail/${filename}`,
+
+  // ─── Features (modular enhancements) ───
+  getFeatures: (): Promise<any> =>
+    fetch(`${API_BASE}/features`, { credentials: 'include' }).then(r => r.json()),
+
+  analyzeEmotion: (audioPath: string): Promise<any> =>
+    postJSON(`${API_BASE}/features/emotion`, { audio_path: audioPath }),
+
+  classifyGenre: (audioPath: string): Promise<any> =>
+    postJSON(`${API_BASE}/features/genre`, { audio_path: audioPath }),
+
+  autoCut: (duration: number, beats: number[], energyCurve?: number[], energyTimes?: number[], count = 7): Promise<any> =>
+    postJSON(`${API_BASE}/features/auto-cut`, {
+      duration, beats,
+      energy_curve: energyCurve || null,
+      energy_times: energyTimes || null,
+      count,
+    }),
+
+  snapToBeats: (fragments: any[], beats: number[]): Promise<any> =>
+    postJSON(`${API_BASE}/features/snap-to-beats`, { fragments, beats }),
 };
 
 function createThumbnailForm(videoPath: string, timestamps: number[]): FormData {

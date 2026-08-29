@@ -37,6 +37,13 @@ async def _run_transcription_pipeline(audio_path: str, language: str, lyrics: st
         logger.warning(f"Stem separation failed ({e}), using original audio")
         whisper_input = audio_path
 
+    # Step 1b: Vocal enhancement (optional, modular)
+    try:
+        from services.vocal_enhance import enhance_if_enabled
+        whisper_input = enhance_if_enabled(whisper_input)
+    except Exception as e:
+        logger.warning(f"Vocal enhancement skipped: {e}")
+
     # Step 2: WhisperX transcribe + align
     whisper_result = transcribe_audio(
         whisper_input, language=language, word_timestamps=True,

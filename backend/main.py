@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from routers import auth, health, files, video, subtitles, audio, transcription, render
+from routers import auth, health, files, video, subtitles, audio, transcription, render, features
 from routers.auth import SESSION_COOKIE, _verify_token, _sessions
 import time
 
@@ -73,7 +73,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app.add_middleware(AuthMiddleware)
 
 # Register all routers
-for r in (auth, health, files, video, subtitles, audio, transcription, render):
+for r in (auth, health, files, video, subtitles, audio, transcription, render, features):
     app.include_router(r.router)
 
-logger.info("RapTok API started — routers: auth, health, files, video, subtitles, audio, transcription, render")
+logger.info("RapTok API started — routers: auth, health, files, video, subtitles, audio, transcription, render, features")

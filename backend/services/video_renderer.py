@@ -3,6 +3,7 @@ import subprocess
 import uuid
 import os
 import shutil
+import logging
 from pathlib import Path
 from models.schemas import Fragment, SubtitleLine, SubtitleStyle
 from services.subtitle_generator import generate_ass
@@ -11,6 +12,8 @@ from config import (
     OUTPUT_WIDTH, OUTPUT_HEIGHT, OUTPUT_FPS,
     FFMPEG_PRESET, FFMPEG_CRF,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def render_clip(
@@ -119,6 +122,28 @@ def render_clip(
         blur_sigma = template.get("blur_sigma", 20)
         dark_overlay = template.get("dark_overlay", 0.0)
         scale_factor = template.get("scale_factor", 1.0)
+    
+    # ── Beat-synced effects (optional, modular) ──
+    beat_effect_filter = ""
+    try:
+        from services.beat_effects import build_beat_filter_safe
+        # Try to get beats from template or request
+        beats = template.get("beats", []) if template else []
+        energy_curve = template.get("energy_curve", []) if template else []
+        energy_times = template.get("energy_times", []) if template else []
+        if beats:
+            # Get concat duration for beat effect timing
+            concat_dur = sum(f.duration for f in fragments)
+            beat_effect_filter = build_beat_filter_safe(
+                beats, concat_dur,
+                video_w=OUTPUT_WIDTH, video_h=OUTPUT_HEIGHT,
+                energy_curve=energy_curve, energy_times=energy_times,
+            )
+            if beat_effect_filter:
+                logger.info(f"Beat effects applied: {len(beats)} beats")
+    except Exception as e:
+        logger.warning(f"Beat effects skipped: {e}")
+        beat_effect_filter = ""
     
     # Build scale filter based on video_mode:
     # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)
