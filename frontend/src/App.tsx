@@ -5,9 +5,10 @@ import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
+import { FeaturePanel } from './components/FeaturePanel';
 import { Login } from './components/Login';
-import { defaultStyle } from './api/client';
-import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult } from './types';
+import { defaultStyle, api } from './api/client';
+import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult, TrackAnalysis } from './types';
 
 type Step = 0 | 1 | 2 | 3 | 4;
 
@@ -37,6 +38,7 @@ function App() {
   const [templateId, setTemplateId] = useState('');
   const [beatDivision, setBeatDivision] = useState('1/4');
   const [audioStart, setAudioStart] = useState(0);
+  const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(null);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -75,9 +77,52 @@ function App() {
     setStep(1);
   };
 
+  // Auto-analyze track when audio is uploaded
+  useEffect(() => {
+    if (audioPath && !trackAnalysis) {
+      api.trackAnalysis(audioPath)
+        .then((data: TrackAnalysis) => setTrackAnalysis(data))
+        .catch((e: unknown) => console.error('Track analysis failed:', e));
+    }
+  }, [audioPath, trackAnalysis]);
+
   const handleFragmentsChange = (frags: Fragment[]) => {
     setFragments(frags);
     if (subtitles.length > 0) setSubtitles([]);
+  };
+
+  // ── FeaturePanel handlers ──
+  const handleApplyStyle = (s: Partial<{ font: string; size: number; active_color: string; bold: boolean }>) => {
+    setStyle(prev => ({ ...prev, ...s }));
+  };
+
+  const handleApplyTemplate = (tid: string) => {
+    setTemplateId(tid);
+  };
+
+  const handleAutoCut = (newFrags: any[]) => {
+    if (newFrags?.length) {
+      setFragments(newFrags.map((f: any, i: number) => ({ 
+        id: i, start: f.start, end: f.end, duration: f.duration 
+      })));
+    }
+  };
+
+  const handleSnapToBeats = async (_currentFrags: any[]) => {
+    if (!bpmData?.beats?.length) return;
+    try {
+      const result = await api.snapToBeats(
+        fragments.map(f => ({ id: f.id, start: f.start, end: f.end, duration: f.duration })),
+        bpmData.beats
+      );
+      if (result.fragments?.length) {
+        setFragments(result.fragments.map((f: any) => ({ 
+          id: f.id, start: f.start, end: f.end, duration: f.duration 
+        })));
+      }
+    } catch (e) {
+      console.error('Snap to beats failed:', e);
+    }
   };
 
   return (
@@ -176,6 +221,8 @@ function App() {
           )}
 
           {step === 1 && videoInfo && (
+            <div className="flex gap-4">
+              <div className="flex-1 min-w-0">
             <FragmentEditor
               videoInfo={videoInfo}
               fragments={fragments}
@@ -186,6 +233,19 @@ function App() {
               onBpmDetected={setBpmData}
               bpmData={bpmData}
             />
+              </div>
+              <div className="w-72 flex-shrink-0">
+                <FeaturePanel
+                  audioPath={audioPath}
+                  bpmData={bpmData}
+                  trackAnalysis={trackAnalysis}
+                  onApplyStyle={handleApplyStyle}
+                  onApplyTemplate={handleApplyTemplate}
+                  onAutoCut={handleAutoCut}
+                  onSnapToBeats={handleSnapToBeats}
+                />
+              </div>
+            </div>
           )}
 
           {/* Step 2: keep mounted, hide when not active — preserves internal state */}
@@ -233,6 +293,8 @@ function App() {
           </div>
 
           {step === 4 && (
+            <div className="flex gap-4">
+              <div className="flex-1 min-w-0">
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
@@ -245,6 +307,17 @@ function App() {
               displayMode={displayMode}
               templateId={templateId}
             />
+              </div>
+              <div className="w-72 flex-shrink-0">
+                <FeaturePanel
+                  audioPath={audioPath}
+                  bpmData={bpmData}
+                  trackAnalysis={trackAnalysis}
+                  onApplyStyle={handleApplyStyle}
+                  onApplyTemplate={handleApplyTemplate}
+                />
+              </div>
+            </div>
           )}
         </div>
 
