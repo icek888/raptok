@@ -286,14 +286,18 @@ async def audio_preview(filename: str):
     raise HTTPException(status_code=404, detail="Audio file not found")
 
 
-# ─── Preview clip: concat selected fragments + extract audio segment ───
+# ─── Preview clip: concat video fragments + extract audio segment ───
 
 @app.post("/api/prepare-preview")
 async def prepare_preview(req: PreparePreviewRequest):
     """
-    Extract a preview clip from the source video by concatenating selected fragments.
-    Also extracts the corresponding audio segment.
-    Returns URLs for video + audio that the frontend can use in <video>/<audio> tags.
+    Prepare a preview clip:
+    1. Concat selected VIDEO fragments (from Step 1) into one clip.
+    2. Extract AUDIO segment (from Step 2): continuous slice from audio_start,
+       length = total duration of all video fragments.
+    3. Shift word_timings & subtitles to 0-based relative to concat video clip.
+       Words are 0-based relative to audio_start. We map each word to the
+       corresponding video fragment based on cumulative time.
     """
     try:
         import subprocess
@@ -304,16 +308,9 @@ async def prepare_preview(req: PreparePreviewRequest):
             raise HTTPException(status_code=400, detail="No fragments provided")
 
         job_id = f"preview_{os.urandom(6).hex()}"
+        total_video_dur = sum(f.duration for f in fragments)
 
-        # ── 1. Concat video fragments into one clip ──
-        # Build ffmpeg concat filter
-        inputs = []
-        filter_parts = []
-        for i, frag in enumerate(fragments):
-            inputs.extend(["-ss", str(frag.start), "-t", str(frag.duration)])
-            filter_parts.append(f"[{i}:v]")
-
-        # Use ffmpeg concat demuxer with inpoint/outpoint (ffmpeg 7.x syntax)
+        # ── 1. Concat VIDEO fragments (from Step 1) ──
         concat_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
         for frag in fragments:
             concat_file.write(f"file '{req.video_path}'\n")
@@ -322,8 +319,6 @@ async def prepare_preview(req: PreparePreviewRequest):
         concat_file.close()
 
         preview_video = TEMP_DIR / f"{job_id}.mp4"
-
-        # Use ffmpeg concat demuxer with stream copy
         result = subprocess.run([
             "ffmpeg", "-y", "-f", "concat", "-safe", "0",
             "-i", concat_file.name,
@@ -332,7 +327,7 @@ async def prepare_preview(req: PreparePreviewRequest):
         ], capture_output=True, timeout=120)
 
         if result.returncode != 0:
-            # Fallback: re-encode if stream copy fails (different codecs etc.)
+            # Fallback: re-encode
             result = subprocess.run([
                 "ffmpeg", "-y", "-f", "concat", "-safe", "0",
                 "-i", concat_file.name,
@@ -340,99 +335,96 @@ async def prepare_preview(req: PreparePreviewRequest):
                 "-an",
                 str(preview_video)
             ], capture_output=True, timeout=180)
-
         os.unlink(concat_file.name)
 
-        # ── 2. Concat audio fragments (same fragments, offset by audio_start) ──
-        # Audio file is the full song. Fragments are absolute (relative to source video).
-        # Audio corresponds to video, so audio fragment = video fragment (same timeline).
-        # We use the same inpoint/outpoint but on the audio file.
+        # ── 2. Extract AUDIO segment (from Step 2) ──
+        # Audio is a continuous slice from audio_start, length = total video duration.
+        # Words are 0-based relative to audio_start, so they map directly to audio.
         preview_audio = None
         if req.audio_path:
-            audio_offset = req.audio_start or 0.0
-            audio_concat_file = tempfile.NamedTemporaryFile(mode="w", suffix="_audio.txt", delete=False)
-            for frag in fragments:
-                # Audio fragment: same time range as video fragment (both from same source)
-                audio_concat_file.write(f"file '{req.audio_path}'\n")
-                audio_concat_file.write(f"inpoint {frag.start}\n")
-                audio_concat_file.write(f"outpoint {frag.start + frag.duration}\n")
-            audio_concat_file.close()
-
+            audio_start = req.audio_start or 0.0
             preview_audio = TEMP_DIR / f"{job_id}_audio.mp3"
             result = subprocess.run([
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                "-i", audio_concat_file.name,
+                "ffmpeg", "-y",
+                "-ss", str(audio_start), "-t", str(total_video_dur),
+                "-i", req.audio_path,
                 "-ac", "2", "-ab", "128k",
                 str(preview_audio)
             ], capture_output=True, timeout=120)
             if result.returncode != 0:
-                preview_audio = None  # audio optional
-            os.unlink(audio_concat_file.name)
+                preview_audio = None
 
-        # ── 3. Shift word timings to be 0-based (relative to concat clip) ──
-        # word_timings from frontend are 0-based relative to audio_start (already shifted
-        # by SubtitleEditor). Fragments are absolute (relative to source video).
-        # So we shift fragments by -audio_start to match word_timings' frame of reference.
-        audio_offset = req.audio_start or 0.0
+        # ── 3. Map word_timings to concat video timeline ──
+        # Words are 0-based relative to audio_start (from SubtitleEditor).
+        # Video concat clip is also 0-based (first fragment starts at 0).
+        # BUT: video fragments are scattered (e.g. 18-22s, 40-44s, 61-66s...).
+        # Audio is continuous (0s to total_video_dur).
+        # So word at time T (0-based audio) maps to time T in the concat video.
+        # Words that fall in "gaps" between video fragments are simply dropped
+        # (no video to show them on).
+        #
+        # To map: build a cumulative timeline for video fragments:
+        #   frag 0: [0, dur0)
+        #   frag 1: [dur0, dur0+dur1)
+        #   ...
+        # Word at time T belongs to fragment i if:
+        #   cum_start[i] <= T < cum_end[i]
+        # Then shifted to: T - cum_start[i] + cum_start[i] = T (already 0-based!)
+        #
+        # Actually: since both audio and concat video start at 0 and have the
+        # same total duration, word at time T in audio = time T in concat video.
+        # We just need to filter words that fall in video gaps.
+
+        # Build cumulative fragment boundaries (0-based)
+        frag_boundaries = []
+        cum = 0.0
+        for frag in fragments:
+            frag_boundaries.append((cum, cum + frag.duration))
+            cum += frag.duration
+
+        def in_any_fragment(t):
+            """Check if time t falls within any video fragment's range."""
+            for (s, e) in frag_boundaries:
+                if s - 0.3 <= t < e:  # 0.3s tolerance
+                    return True
+            return False
+
+        # Words: keep only those that fall within video fragment boundaries
         shifted_timings = []
-        current_offset = 0.0
-        used_word_ids = set()
-        for frag in fragments:
-            # Shift fragment to 0-based (relative to audio_start)
-            frag_start_rel = frag.start - audio_offset
-            frag_end_rel = frag.end - audio_offset
-            for i, w in enumerate(req.word_timings or []):
-                if i in used_word_ids:
-                    continue
-                w_start = w.get("start", 0)
-                # Word belongs to this fragment if it starts within [frag_start_rel - 0.5, frag_end_rel)
-                if w_start >= frag_start_rel - 0.5 and w_start < frag_end_rel:
-                    shifted_timings.append({
-                        **w,
-                        "start": round(max(0, w["start"] - frag_start_rel + current_offset), 3),
-                        "end": round(max(0, w["end"] - frag_start_rel + current_offset), 3),
-                    })
-                    used_word_ids.add(i)
-            current_offset += frag.duration
+        for w in (req.word_timings or []):
+            w_start = w.get("start", 0)
+            if in_any_fragment(w_start):
+                # Word time is already 0-based relative to audio_start,
+                # and concat video is also 0-based. Direct mapping!
+                shifted_timings.append({
+                    **w,
+                    "start": round(max(0, w["start"]), 3),
+                    "end": round(max(0, w["end"]), 3),
+                })
 
-        # ── 4. Shift subtitles similarly ──
+        # Subtitles: same logic
         shifted_subs = []
-        current_offset = 0.0
-        used_sub_ids = set()
-        for frag in fragments:
-            frag_start_rel = frag.start - audio_offset
-            frag_end_rel = frag.end - audio_offset
-            for i, s in enumerate(req.subtitles or []):
-                if i in used_sub_ids:
-                    continue
-                s_start = s.get("start", 0)
-                if s_start >= frag_start_rel - 0.5 and s_start < frag_end_rel:
-                    shifted_sub = {**s}
-                    shifted_sub["start"] = round(max(0, s["start"] - frag_start_rel + current_offset), 3)
-                    shifted_sub["end"] = round(max(0, s["end"] - frag_start_rel + current_offset), 3)
-                    if shifted_sub.get("words"):
-                        shifted_sub["words"] = [
-                            {**w,
-                             "start": round(max(0, w["start"] - frag_start_rel + current_offset), 3),
-                             "end": round(max(0, w["end"] - frag_start_rel + current_offset), 3)}
-                            for w in shifted_sub["words"]
-                        ]
-                    shifted_subs.append(shifted_sub)
-                    used_sub_ids.add(i)
-            current_offset += frag.duration
+        for s in (req.subtitles or []):
+            s_start = s.get("start", 0)
+            if in_any_fragment(s_start):
+                shifted_sub = {**s}
+                shifted_sub["start"] = round(max(0, s["start"]), 3)
+                shifted_sub["end"] = round(max(0, s["end"]), 3)
+                if shifted_sub.get("words"):
+                    shifted_sub["words"] = [
+                        {**w,
+                         "start": round(max(0, w["start"]), 3),
+                         "end": round(max(0, w["end"]), 3)}
+                        for w in shifted_sub["words"]
+                    ]
+                shifted_subs.append(shifted_sub)
 
-        total_duration = sum(f.duration for f in fragments)
+        total_duration = total_video_dur
 
-        print(f"[prepare-preview] fragments={len(fragments)} audio_offset={audio_offset}")
+        print(f"[prepare-preview] fragments={len(fragments)} total_dur={total_video_dur:.1f}")
         print(f"[prepare-preview] word_timings IN={len(req.word_timings or [])} OUT={len(shifted_timings)}")
         print(f"[prepare-preview] subtitles IN={len(req.subtitles or [])} OUT={len(shifted_subs)}")
-        if shifted_timings:
-            print(f"[prepare-preview] first word: {shifted_timings[0]}")
-        if shifted_subs:
-            print(f"[prepare-preview] first sub: {shifted_subs[0].get('start')}-{shifted_subs[0].get('end')} '{shifted_subs[0].get('text','')}'")
-        # Show all fragments with their relative ranges
-        for i, frag in enumerate(fragments):
-            print(f"[prepare-preview] frag #{i}: abs[{frag.start}-{frag.end}] rel[{frag.start - audio_offset:.1f}-{frag.end - audio_offset:.1f}] dur={frag.duration}")
+        print(f"[prepare-preview] fragment boundaries: {[(round(s,1), round(e,1)) for s,e in frag_boundaries]}")
 
         return {
             "video_url": f"/api/video/{preview_video.name}",
