@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { Film, Scissors, Type, Wand2, Music, Eye } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Film, Scissors, Type, Wand2, Music, Eye, LogOut } from 'lucide-react';
 import { InputPanel } from './components/InputPanel';
 import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
+import { Login } from './components/Login';
 import { defaultStyle } from './api/client';
 import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult } from './types';
 
@@ -19,6 +20,8 @@ const STEPS = [
 ];
 
 function App() {
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [username, setUsername] = useState('');
   const [step, setStep] = useState<Step>(0);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [audioPath, setAudioPath] = useState<string | null>(null);
@@ -34,6 +37,27 @@ function App() {
   const [templateId, setTemplateId] = useState('');
   const [beatDivision, setBeatDivision] = useState('1/4');
   const [audioStart, setAudioStart] = useState(0);
+
+  // ── Auth check on mount ──
+  useEffect(() => {
+    fetch('/api/auth/check', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.authenticated) {
+          setAuthed(true);
+          setUsername(data.username);
+        } else {
+          setAuthed(false);
+        }
+      })
+      .catch(() => setAuthed(false));
+  }, []);
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    setAuthed(false);
+    setUsername('');
+  };
 
   const canProceed = (s: Step): boolean => {
     switch (s) {
@@ -58,6 +82,17 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-gray-100">
+      {/* Auth gate */}
+      {authed === null && (
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-10 h-10 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+      {authed === false && (
+        <Login onLogin={(u) => { setAuthed(true); setUsername(u); }} />
+      )}
+      {authed === true && (
+        <>
       {/* Header */}
       <header className="border-b border-[#1a1a2a] bg-[#0a0a0f]/95 backdrop-blur sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-6 py-4 flex items-center justify-between">
@@ -71,16 +106,27 @@ function App() {
             </div>
           </div>
 
-          {bpmData && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-              <span className="text-sm text-purple-400 font-mono">♩ {bpmData.bpm}</span>
-              <span className="text-xs text-gray-500">BPM</span>
-            </div>
-          )}
+          <div className="flex items-center gap-4">
+            {bpmData && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                <span className="text-sm text-purple-400 font-mono">♩ {bpmData.bpm}</span>
+                <span className="text-xs text-gray-500">BPM</span>
+              </div>
+            )}
 
-          <a href="https://github.com/icek888/raptok" target="_blank" rel="noopener" className="text-sm text-gray-500 hover:text-gray-300 transition">
-            GitHub
-          </a>
+            <span className="text-xs text-gray-500">{username}</span>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-400 transition"
+              title="Logout"
+            >
+              <LogOut size={16} />
+            </button>
+
+            <a href="https://github.com/icek888/raptok" target="_blank" rel="noopener" className="text-sm text-gray-500 hover:text-gray-300 transition">
+              GitHub
+            </a>
+          </div>
         </div>
       </header>
 
@@ -222,6 +268,8 @@ function App() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

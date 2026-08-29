@@ -9,6 +9,7 @@ async function postJSON(url: string, body: unknown): Promise<any> {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -19,7 +20,7 @@ async function postJSON(url: string, body: unknown): Promise<any> {
 }
 
 async function postForm(url: string, form: FormData): Promise<any> {
-  const res = await fetch(url, { method: 'POST', body: form });
+  const res = await fetch(url, { method: 'POST', body: form, credentials: 'include' });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || `HTTP ${res.status}`);
@@ -109,7 +110,7 @@ export const api = {
     }),
 
   getTemplates: (): Promise<{ templates: RenderTemplate[] }> =>
-    fetch(`${API_BASE}/templates`).then(r => r.json()),
+    fetch(`${API_BASE}/templates`, { credentials: 'include' }).then(r => r.json()),
 
   preparePreview: (
     videoPath: string,
@@ -195,7 +196,7 @@ export const api = {
       if (modelSize) form.append('model_size', modelSize);
 
       // Use fetch with streaming response
-      fetch(`${API_BASE}/transcribe-full-stream`, { method: 'POST', body: form })
+      fetch(`${API_BASE}/transcribe-full-stream`, { method: 'POST', body: form, credentials: 'include' })
         .then(async (res) => {
           const reader = res.body?.getReader();
           if (!reader) { reject(new Error('No response body')); return; }
