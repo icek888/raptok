@@ -132,18 +132,11 @@ async def logout(request: Request, response: Response):
 
 @router.get("/api/auth/check")
 async def auth_check(request: Request):
-    """Check if current session is valid. Also auto-login by IP."""
+    """Check if current session is valid (cookie-based only)."""
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         session = _verify_token(token)
         if session:
             return {"authenticated": True, "username": session["username"]}
-
-    # Auto-login by IP: if a session exists for this IP, reuse it
-    forwarded = request.headers.get("x-forwarded-for")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-    for t, s in _sessions.items():
-        if s.get("ip") == ip and s.get("expires", 0) > time.time():
-            return {"authenticated": True, "username": s["username"]}
 
     raise HTTPException(status_code=401, detail="Not authenticated")

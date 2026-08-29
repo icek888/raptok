@@ -59,17 +59,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api/"):
             return await call_next(request)
 
-        # Check session cookie
+        # Check session cookie — this is the only auth method
         token = request.cookies.get(SESSION_COOKIE)
         if token:
             session = _verify_token(token)
             if session:
-                return await call_next(request)
-
-        # Auto-login by IP (for returning users from same real IP)
-        ip = _get_client_ip(request)
-        for t, s in _sessions.items():
-            if s.get("ip") == ip and s.get("expires", 0) > time.time():
                 return await call_next(request)
 
         # Not authenticated
