@@ -6,7 +6,6 @@ import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
 import { CutToolsPanel } from './components/CutToolsPanel';
-import { AIStylePanel } from './components/AIStylePanel';
 import { BeatEffectsPanel } from './components/BeatEffectsPanel';
 import { Login } from './components/Login';
 import { defaultStyle, api } from './api/client';
@@ -17,7 +16,7 @@ type Step = 0 | 1 | 2 | 3 | 4;
 const STEPS = [
   { id: 0 as Step, label: 'Input', icon: Film },
   { id: 1 as Step, label: 'Fragments', icon: Scissors },
-  { id: 2 as Step, label: 'Subtitles', icon: Type },
+  { id: 2 as Step, label: 'Lyrics', icon: Type },
   { id: 3 as Step, label: 'Preview', icon: Eye },
   { id: 4 as Step, label: 'Render', icon: Wand2 },
 ];
@@ -253,9 +252,8 @@ function App() {
             </div>
           )}
 
-          {/* Step 2: Subtitles + AIStylePanel (keep mounted, hide) */}
-          <div style={{ display: step === 2 ? 'flex' : 'none' }} className="gap-4">
-            <div className="flex-1 min-w-0">
+          {/* Step 2: Lyrics — SubtitleEditor with integrated AIStylePanel (keep mounted, hide) */}
+          <div style={{ display: step === 2 ? 'block' : 'none' }}>
             <SubtitleEditor
               lyrics={lyrics}
               fragments={fragments}
@@ -274,15 +272,9 @@ function App() {
               onStyleChange={setStyle}
               templateId={templateId}
               onTemplateChange={setTemplateId}
+              onApplyStyle={handleApplyStyle}
+              onApplyTemplate={handleApplyTemplate}
             />
-            </div>
-            <div className="w-72 flex-shrink-0">
-              <AIStylePanel
-                audioPath={audioPath || undefined}
-                onApplyStyle={handleApplyStyle}
-                onApplyTemplate={handleApplyTemplate}
-              />
-            </div>
           </div>
 
           {/* Step 3: Preview + BeatEffectsPanel (keep mounted) */}

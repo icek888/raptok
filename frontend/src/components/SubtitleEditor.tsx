@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, RenderTemplate } from '../types';
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
-import { TrackAnalysisPanel } from './TrackAnalysisPanel';
+import { AIStylePanel } from './AIStylePanel';
 import { assToCss, cssToAss } from '../utils/colors';
 import { WORD_COLORS } from '../utils/constants';
 import { useTemplates, applyTemplateToStyle } from '../utils/templates';
@@ -29,6 +29,8 @@ interface Props {
   onStyleChange: (style: SubtitleStyle) => void;
   templateId?: string;
   onTemplateChange?: (id: string) => void;
+  onApplyStyle?: (style: Partial<SubtitleStyle>) => void;
+  onApplyTemplate?: (templateId: string) => void;
 }
 
 export function SubtitleEditor({
@@ -39,6 +41,7 @@ export function SubtitleEditor({
   videoUrl, onAudioStartChange,
   style, onStyleChange,
   templateId, onTemplateChange,
+  onApplyStyle, onApplyTemplate,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
@@ -619,7 +622,11 @@ export function SubtitleEditor({
               </span>
             )}
           </div>
-          <TrackAnalysisPanel audioPath={audioPath!} onHookSeek={seekTo} />
+          <AIStylePanel
+            audioPath={audioPath || undefined}
+            onApplyStyle={onApplyStyle || ((s: Partial<SubtitleStyle>) => onStyleChange({ ...style, ...s }))}
+            onApplyTemplate={onApplyTemplate || ((id: string) => onTemplateChange?.(id))}
+          />
           <TimelinePreview
             fragments={fragments}
             subtitles={subtitles}
@@ -993,7 +1000,6 @@ export function SubtitleEditor({
   // ── RIGHT COLUMN: Large video preview ──
   const rightColumn = (
     <PreviewFrame
-      videoUrl={videoUrl}
       subtitles={subtitles}
       wordTimings={wordTimings}
       displayMode={displayMode}
