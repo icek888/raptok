@@ -48,6 +48,7 @@ function App() {
   const [flashIntensity, setFlashIntensity] = useState(0.3);
   const [shakeIntensity, setShakeIntensity] = useState(0);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [userRole, setUserRole] = useState('user');
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -57,6 +58,7 @@ function App() {
         if (data?.authenticated) {
           setAuthed(true);
           setUsername(data.username);
+          setUserRole(data.role || 'user');
         } else {
           setAuthed(false);
         }
@@ -370,6 +372,7 @@ function App() {
       {showDashboard && (
         <Dashboard
           username={username}
+          role={userRole}
           onClose={() => setShowDashboard(false)}
           onNewProject={() => {
             setShowDashboard(false);

@@ -324,6 +324,22 @@ export const api = {
 
   // ── Stats ──
   getStats: () => getJSON(`${API_BASE}/stats`),
+
+  // ── Quota ──
+  getQuota: () => getJSON(`${API_BASE}/quota`),
+
+  // ── Plans ──
+  getPlans: () => getJSON(`${API_BASE}/plans`),
+
+  // ── Admin ──
+  adminStats: () => getJSON(`${API_BASE}/admin/stats`),
+  adminListUsers: () => getJSON(`${API_BASE}/admin/users`),
+  adminCreateUser: (username: string, password: string, role: string, plan: string) =>
+    postJSON(`${API_BASE}/admin/users`, { username, password, role, plan }),
+  adminUpdateUser: (username: string, data: any) =>
+    putJSON(`${API_BASE}/admin/users/${username}`, data),
+  adminDeleteUser: (username: string) => delJSON(`${API_BASE}/admin/users/${username}`),
+  adminUserQuota: (username: string) => getJSON(`${API_BASE}/admin/users/${username}/quota`),
 };
 
 function createThumbnailForm(videoPath: string, timestamps: number[]): FormData {

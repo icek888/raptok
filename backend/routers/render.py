@@ -21,6 +21,20 @@ router = APIRouter()
 async def api_render(req: RenderRequest, request):
     """Render the final TikTok clip."""
     try:
+        # ── Quota check ──
+        from services import database
+        from routers.auth import SESSION_COOKIE, _verify_token
+        _token = request.cookies.get(SESSION_COOKIE)
+        if _token:
+            _session = _verify_token(_token)
+            if _session:
+                quota = database.check_render_quota(_session["username"])
+                if not quota["allowed"]:
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Daily render limit reached ({quota['limit']}/day on {quota['plan']} plan). Upgrade to continue."
+                    )
+
         fragments = parse_fragments(req.fragments)
         subtitles = parse_subtitles(req.subtitles)
 
@@ -102,6 +116,8 @@ async def api_render(req: RenderRequest, request):
                         duration=total_dur,
                         file_size=file_size,
                     )
+                    # Record quota usage
+                    database.record_render_quota(session["username"])
         except Exception as e:
             logger.warning(f"Failed to save render to DB: {e}")
 

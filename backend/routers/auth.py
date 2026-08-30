@@ -1,4 +1,8 @@
-"""Authentication router: login, logout, session management."""
+"""Authentication router: login, logout, session management.
+
+Uses SQLite users table (seeded on init). Falls back to static USERS
+only if DB is unavailable.
+"""
 import os
 import time
 import json
@@ -9,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request, Response, HTTPException
 from pydantic import BaseModel
 from config import TEMP_DIR
+from services import database
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -18,20 +23,7 @@ SESSION_COOKIE = "raptok_session"
 SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days
 SECRET_KEY = os.environ.get("RAPTOK_SECRET", "raptok-secret-2026-change-me")
 
-# ── Users (in-memory, static) ──
-USERS = {
-    "admin": {
-        "password": "raptok2026!",
-        "role": "admin",
-    },
-    "adminvadik": {
-        "password": "vadik2026!",
-        "role": "admin",
-    },
-}
-
 # ── Session store: {session_token: {username, ip, expires}} ──
-# Persist to disk so sessions survive restarts
 SESSIONS_FILE = TEMP_DIR / ".sessions.json"
 _sessions: dict = {}
 
@@ -41,7 +33,6 @@ def _load_sessions():
     try:
         if SESSIONS_FILE.exists():
             data = json.loads(SESSIONS_FILE.read_text())
-            # Expire old sessions
             now = time.time()
             _sessions = {k: v for k, v in data.items() if v.get("expires", 0) > now}
     except Exception:
@@ -54,6 +45,9 @@ def _save_sessions():
     except Exception as e:
         logger.warning(f"Failed to save sessions: {e}")
 
+# Init DB + seed users on import
+database.init_db()
+database.seed_users()
 _load_sessions()
 
 
@@ -91,11 +85,11 @@ class LoginRequest(BaseModel):
 @router.post("/api/auth/login")
 async def login(req: LoginRequest, request: Request, response: Response):
     """Login with username/password. Creates a session cookie."""
-    user = USERS.get(req.username)
-    if not user or not hmac.compare_digest(user["password"], req.password):
+    # Check DB users
+    user = database.verify_user(req.username, req.password)
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # Get real client IP (behind Traefik proxy)
     forwarded = request.headers.get("x-forwarded-for")
     ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
     token = _make_token(req.username, ip)
@@ -115,8 +109,8 @@ async def login(req: LoginRequest, request: Request, response: Response):
         samesite="lax",
         path="/",
     )
-    logger.info(f"Login: {req.username} from {ip}")
-    return {"username": req.username, "role": user["role"]}
+    logger.info(f"Login: {req.username} (role={user['role']}, plan={user['plan']}) from {ip}")
+    return {"username": req.username, "role": user["role"], "plan": user["plan"]}
 
 
 @router.post("/api/auth/logout")
@@ -137,6 +131,18 @@ async def auth_check(request: Request):
     if token:
         session = _verify_token(token)
         if session:
-            return {"authenticated": True, "username": session["username"]}
+            # Get fresh user data for plan/role
+            user = database.get_user(session["username"])
+            if user and user["is_active"]:
+                return {
+                    "authenticated": True,
+                    "username": session["username"],
+                    "role": user["role"],
+                    "plan": user["plan"],
+                }
+            # User deactivated after login
+            if user and not user["is_active"]:
+                del _sessions[token]
+                _save_sessions()
 
     raise HTTPException(status_code=401, detail="Not authenticated")

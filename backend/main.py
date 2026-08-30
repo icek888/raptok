@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from routers import auth, health, files, video, subtitles, audio, transcription, render, features, projects
+from routers import auth, health, files, video, subtitles, audio, transcription, render, features, projects, admin
 from routers.auth import SESSION_COOKIE, _verify_token, _sessions
 import time
 
@@ -33,6 +33,7 @@ PUBLIC_PATHS = {
     "/docs",
     "/openapi.json",
     "/",
+    "/api/plans",
 }
 
 # File-serving paths that require auth
@@ -73,7 +74,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app.add_middleware(AuthMiddleware)
 
 # Register all routers
-for r in (auth, health, files, video, subtitles, audio, transcription, render, features, projects):
+for r in (auth, health, files, video, subtitles, audio, transcription, render, features, projects, admin):
     app.include_router(r.router)
 
-logger.info("RapTok API started — routers: auth, health, files, video, subtitles, audio, transcription, render, features, projects")
+logger.info("RapTok API started — routers: auth, health, files, video, subtitles, audio, transcription, render, features, projects, admin")
