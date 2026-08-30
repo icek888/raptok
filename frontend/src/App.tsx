@@ -5,7 +5,9 @@ import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
-import { FeaturePanel } from './components/FeaturePanel';
+import { CutToolsPanel } from './components/CutToolsPanel';
+import { AIStylePanel } from './components/AIStylePanel';
+import { BeatEffectsPanel } from './components/BeatEffectsPanel';
 import { Login } from './components/Login';
 import { defaultStyle, api } from './api/client';
 import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult, TrackAnalysis } from './types';
@@ -39,6 +41,12 @@ function App() {
   const [beatDivision, setBeatDivision] = useState('1/4');
   const [audioStart, setAudioStart] = useState(0);
   const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(null);
+
+  // Beat effects state
+  const [beatEffectsOn, setBeatEffectsOn] = useState(false);
+  const [zoomIntensity, setZoomIntensity] = useState(0.08);
+  const [flashIntensity, setFlashIntensity] = useState(0.3);
+  const [shakeIntensity, setShakeIntensity] = useState(0);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -91,8 +99,8 @@ function App() {
     if (subtitles.length > 0) setSubtitles([]);
   };
 
-  // ── FeaturePanel handlers ──
-  const handleApplyStyle = (s: Partial<{ font: string; size: number; active_color: string; bold: boolean }>) => {
+  // ── AI Style handlers ──
+  const handleApplyStyle = (s: Partial<SubtitleStyle>) => {
     setStyle(prev => ({ ...prev, ...s }));
   };
 
@@ -100,29 +108,27 @@ function App() {
     setTemplateId(tid);
   };
 
+  // ── Cut Tools handlers ──
   const handleAutoCut = (newFrags: any[]) => {
     if (newFrags?.length) {
-      setFragments(newFrags.map((f: any, i: number) => ({ 
-        id: i, start: f.start, end: f.end, duration: f.duration 
+      setFragments(newFrags.map((f: any, i: number) => ({
+        id: i, start: f.start, end: f.end, duration: f.duration
       })));
     }
   };
 
-  const handleSnapToBeats = async (_currentFrags: any[]) => {
-    if (!bpmData?.beats?.length) return;
-    try {
-      const result = await api.snapToBeats(
-        fragments.map(f => ({ id: f.id, start: f.start, end: f.end, duration: f.duration })),
-        bpmData.beats
-      );
-      if (result.fragments?.length) {
-        setFragments(result.fragments.map((f: any) => ({ 
-          id: f.id, start: f.start, end: f.end, duration: f.duration 
-        })));
-      }
-    } catch (e) {
-      console.error('Snap to beats failed:', e);
+  const handleSnapToBeats = (newFrags: any[]) => {
+    if (newFrags?.length) {
+      setFragments(newFrags.map((f: any) => ({
+        id: f.id, start: f.start, end: f.end, duration: f.duration
+      })));
     }
+  };
+
+  const handleIntensityChange = (type: 'zoom' | 'flash' | 'shake', value: number) => {
+    if (type === 'zoom') setZoomIntensity(value);
+    else if (type === 'flash') setFlashIntensity(value);
+    else setShakeIntensity(value);
   };
 
   return (
@@ -220,6 +226,7 @@ function App() {
             />
           )}
 
+          {/* Step 1: Fragments + CutToolsPanel */}
           {step === 1 && videoInfo && (
             <div className="flex gap-4">
               <div className="flex-1 min-w-0">
@@ -235,21 +242,20 @@ function App() {
             />
               </div>
               <div className="w-72 flex-shrink-0">
-                <FeaturePanel
-                  audioPath={audioPath}
+                <CutToolsPanel
                   bpmData={bpmData}
                   trackAnalysis={trackAnalysis}
-                  onApplyStyle={handleApplyStyle}
-                  onApplyTemplate={handleApplyTemplate}
                   onAutoCut={handleAutoCut}
                   onSnapToBeats={handleSnapToBeats}
+                  fragments={fragments}
                 />
               </div>
             </div>
           )}
 
-          {/* Step 2: keep mounted, hide when not active — preserves internal state */}
-          <div style={{ display: step === 2 ? 'block' : 'none' }}>
+          {/* Step 2: Subtitles + AIStylePanel (keep mounted, hide) */}
+          <div style={{ display: step === 2 ? 'flex' : 'none' }} className="gap-4">
+            <div className="flex-1 min-w-0">
             <SubtitleEditor
               lyrics={lyrics}
               fragments={fragments}
@@ -269,10 +275,19 @@ function App() {
               templateId={templateId}
               onTemplateChange={setTemplateId}
             />
+            </div>
+            <div className="w-72 flex-shrink-0">
+              <AIStylePanel
+                audioPath={audioPath || undefined}
+                onApplyStyle={handleApplyStyle}
+                onApplyTemplate={handleApplyTemplate}
+              />
+            </div>
           </div>
 
-          {/* Step 3: Video Preview Editor — also keep mounted */}
-          <div style={{ display: step === 3 ? 'block' : 'none' }}>
+          {/* Step 3: Preview + BeatEffectsPanel (keep mounted) */}
+          <div style={{ display: step === 3 ? 'flex' : 'none' }} className="gap-4">
+            <div className="flex-1 min-w-0">
             <VideoPreviewEditor
               videoInfo={videoInfo}
               videoUrl={videoInfo?.local_path || null}
@@ -290,11 +305,22 @@ function App() {
               templateId={templateId}
               onTemplateChange={setTemplateId}
             />
+            </div>
+            <div className="w-72 flex-shrink-0">
+              <BeatEffectsPanel
+                bpmData={bpmData}
+                beatEffectsEnabled={beatEffectsOn}
+                onToggle={setBeatEffectsOn}
+                onIntensityChange={handleIntensityChange}
+                zoomIntensity={zoomIntensity}
+                flashIntensity={flashIntensity}
+                shakeIntensity={shakeIntensity}
+              />
+            </div>
           </div>
 
+          {/* Step 4: Render (summary) */}
           {step === 4 && (
-            <div className="flex gap-4">
-              <div className="flex-1 min-w-0">
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
@@ -307,17 +333,6 @@ function App() {
               displayMode={displayMode}
               templateId={templateId}
             />
-              </div>
-              <div className="w-72 flex-shrink-0">
-                <FeaturePanel
-                  audioPath={audioPath}
-                  bpmData={bpmData}
-                  trackAnalysis={trackAnalysis}
-                  onApplyStyle={handleApplyStyle}
-                  onApplyTemplate={handleApplyTemplate}
-                />
-              </div>
-            </div>
           )}
         </div>
 

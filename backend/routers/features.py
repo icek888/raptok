@@ -1,20 +1,18 @@
 """
 Features router — exposes feature flags + enhancement endpoints to frontend.
 
-Frontend can:
-- GET /api/features → list all features + their status (enabled/disabled)
-- POST /api/features/emotion → analyze emotion → get recommended style
-- POST /api/features/genre → classify genre → get recommended template
+Endpoints:
+- GET  /api/features → list all features + their status (enabled/disabled)
+- POST /api/ai-style → unified genre + emotion analysis → recommended template + style
 - POST /api/features/auto-cut → smart cut on beats
+- POST /api/features/snap-to-beats → snap existing fragments to nearest beats
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
 from services.features import get_flags
-from services.emotion_style import analyze_emotion, is_available as emotion_available
-from services.genre_template import classify_genre, is_available as genre_available
-from services.auto_cut import smart_cut, snap_to_beats, is_available as autocut_available
+from services.ai_style import analyze_style
+from services.auto_cut import smart_cut, snap_to_beats
 from services.beat_effects import has_beat_effects
-from services.vocal_enhance import is_available as vocal_available
 
 router = APIRouter()
 
@@ -30,18 +28,15 @@ async def get_features():
             "flash_intensity": flags.beat_flash_intensity,
             "shake_intensity": flags.beat_shake_intensity,
         },
-        "emotion_style": {
-            "enabled": flags.emotion_style_enabled,
-            "available": emotion_available(),
+        "ai_style": {
+            "enabled": flags.emotion_style_enabled or flags.genre_template_enabled,
+            "emotion_enabled": flags.emotion_style_enabled,
+            "genre_enabled": flags.genre_template_enabled,
         },
         "auto_cut": {
             "enabled": flags.auto_cut_enabled,
             "snap_to_beat": flags.auto_cut_snap_to_beat,
             "end_on_beat": flags.auto_cut_end_on_beat,
-        },
-        "genre_template": {
-            "enabled": flags.genre_template_enabled,
-            "available": genre_available(),
         },
         "vocal_enhance": {
             "enabled": flags.vocal_enhance_enabled,
@@ -50,31 +45,38 @@ async def get_features():
     }
 
 
-class EmotionRequest(BaseModel):
+# ── AI Style (unified genre + emotion) ──
+
+class AIStyleRequest(BaseModel):
     audio_path: str
 
 
-@router.post("/api/features/emotion")
-async def api_analyze_emotion(req: EmotionRequest):
-    """Analyze emotion from audio → recommended subtitle style."""
-    result = analyze_emotion(req.audio_path)
-    if result:
-        return result
-    return {"error": "Emotion analysis not available", "recommended_style": None}
+@router.post("/api/ai-style")
+async def api_ai_style(req: AIStyleRequest):
+    """
+    Unified AI style analysis — genre + emotion in one response.
+    
+    Returns:
+        genre, genre_confidence, genre_source,
+        primary_mood, valence, arousal, moods, emotion_source,
+        recommended_template, recommended_style,
+        bpm, energy_score
+    """
+    try:
+        return analyze_style(req.audio_path)
+    except Exception as e:
+        return {
+            "error": str(e),
+            "genre": "hip-hop", "genre_confidence": 0, "genre_source": "error",
+            "primary_mood": "neutral", "valence": 0.5, "arousal": 0.5,
+            "moods": [], "emotion_source": "error",
+            "recommended_template": None,
+            "recommended_style": None,
+            "bpm": None, "energy_score": 0.5,
+        }
 
 
-class GenreRequest(BaseModel):
-    audio_path: str
-
-
-@router.post("/api/features/genre")
-async def api_classify_genre(req: GenreRequest):
-    """Classify genre from audio → recommended template."""
-    result = classify_genre(req.audio_path)
-    if result:
-        return result
-    return {"error": "Genre classification not available", "recommended_template": None}
-
+# ── Auto Cut ──
 
 class AutoCutRequest(BaseModel):
     duration: float
@@ -104,6 +106,8 @@ async def api_auto_cut(req: AutoCutRequest):
         "beat_synced": True,
     }
 
+
+# ── Snap to Beats ──
 
 class SnapRequest(BaseModel):
     fragments: list[dict]

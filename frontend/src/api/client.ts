@@ -246,18 +246,16 @@ export const api = {
   getFeatures: (): Promise<any> =>
     fetch(`${API_BASE}/features`, { credentials: 'include' }).then(r => r.json()),
 
-  analyzeEmotion: (audioPath: string): Promise<any> =>
-    postJSON(`${API_BASE}/features/emotion`, { audio_path: audioPath }),
+  // Unified AI Style (genre + emotion in one call)
+  aiStyle: (audioPath: string): Promise<any> =>
+    postJSON(`${API_BASE}/ai-style`, { audio_path: audioPath }),
 
-  classifyGenre: (audioPath: string): Promise<any> =>
-    postJSON(`${API_BASE}/features/genre`, { audio_path: audioPath }),
-
-  autoCut: (duration: number, beats: number[], energyCurve?: number[], energyTimes?: number[], count = 7): Promise<any> =>
+  autoCut: (duration: number, beats: number[], energyCurve?: number[], energyTimes?: number[], count = 7, minFrag = 3, maxFrag = 6): Promise<any> =>
     postJSON(`${API_BASE}/features/auto-cut`, {
       duration, beats,
       energy_curve: energyCurve || null,
       energy_times: energyTimes || null,
-      count,
+      count, min_frag: minFrag, max_frag: maxFrag,
     }),
 
   snapToBeats: (fragments: any[], beats: number[]): Promise<any> =>

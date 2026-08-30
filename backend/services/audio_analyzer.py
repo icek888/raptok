@@ -183,7 +183,7 @@ def analyze_track(audio_path: str) -> dict:
             "energy_times": energy_times,
             "hook_time": round(hook_time, 2),
             "hook_score": round(hook_score, 3),
-            "genre_hint": genre_hint,
+            "genre_hint": genre_hint,  # heuristic only — use /api/ai-style for HF genre
             "spectral_features": {
                 "centroid": round(centroid_mean, 1),
                 "rolloff": round(rolloff_mean, 1),
