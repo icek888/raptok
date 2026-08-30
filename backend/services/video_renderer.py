@@ -155,7 +155,55 @@ def render_clip(
     # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)
     # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
     # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
-    if video_mode == "crop_fill":
+    #
+    # Beat effects (zoompan/crop/scale) are inserted BEFORE the video mode
+    # filter so they operate on the raw concat video, then blur/overlay/subtitles
+    # are applied on top of the effect-processed video.
+    
+    # For beat effects, we need to split the input and apply effects to the
+    # foreground video, then feed it into the video_mode filter chain.
+    if beat_effect_filter:
+        # Beat effects active: apply to input video first, then use as [0:v]
+        # We prepend the beat filter as a separate stream and reference it.
+        if video_mode == "crop_fill":
+            # crop_fill: beat effects + full-screen + subtitles
+            scale_filter = (
+                f"[0:v]{beat_effect_filter}[vfx];"
+                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
+                f"subtitles={ass_path}[final]"
+            )
+        elif video_mode == "fit_blur_dark":
+            scaled_w = int(OUTPUT_WIDTH * scale_factor)
+            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
+            scale_filter = (
+                # Apply beat effects to input, then split for bg+fg
+                f"[0:v]{beat_effect_filter}[vfx];"
+                # BG: vfx zoomed + blurred + darkened
+                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
+                f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
+                # FG: vfx scaled down (clear)
+                f"[vfx]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+                f"[withbg]subtitles={ass_path}[final]"
+            )
+        else:
+            # fit_blur (default): beat effects + blurred bg
+            scaled_w = int(OUTPUT_WIDTH * scale_factor)
+            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
+            scale_filter = (
+                # Apply beat effects to input video
+                f"[0:v]{beat_effect_filter}[vfx];"
+                # BG: vfx zoomed + blurred
+                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
+                # FG: vfx scaled down (clear)
+                f"[vfx]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+                f"[withbg]subtitles={ass_path}[final]"
+            )
+    elif video_mode == "crop_fill":
         # Full-screen zoomed video — no blur, no bars
         scale_filter = (
             f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
@@ -217,6 +265,6 @@ def render_clip(
     shutil.rmtree(work_dir, ignore_errors=True)
     
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg render failed: {result.stderr[:500]}")
+        raise RuntimeError(f"ffmpeg render failed: {result.stderr[-2000:]}")
     
     return str(output_path)

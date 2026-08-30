@@ -1,14 +1,21 @@
 """
 Beat-synced video effects — zoom pulse, flash, shake on musical beats.
 
-Generates ffmpeg filter_complex expressions that apply effects at beat timestamps.
+Uses ffmpeg `sendcmd` + timeline approach: generates a command file with
+filter parameter changes at each beat timestamp. This is the standard
+ffmpeg way to apply time-varying effects and handles hundreds of beats
+without expression length issues.
+
 All effects are CPU-only (ffmpeg filters), no GPU needed.
 
 Usage:
-    from services.beat_effects import build_beat_filter, has_beat_effects
-    if has_beat_effects():
-        filter = build_beat_filter(beats, duration, video_w=1080, video_h=1920)
+    from services.beat_effects import build_beat_filter, generate_beat_cmd_file
+    cmd_file = generate_beat_cmd_file(beats, duration, zoom=0.08, flash=0.3, shake=0.1)
+    filter = build_beat_filter(beats, duration, zoom_intensity=0.08, ...)
+    # filter uses sendcmd + filter chain
 """
+import os
+import tempfile
 import logging
 from typing import Optional
 from services.features import get_flags
@@ -26,6 +33,70 @@ def has_beat_effects() -> bool:
     )
 
 
+def generate_beat_cmd_file(
+    beats: list[float],
+    duration: float,
+    zoom_intensity: float = 0.0,
+    flash_intensity: float = 0.0,
+    shake_intensity: float = 0.0,
+) -> str | None:
+    """
+    Generate a sendcmd timeline file for beat effects.
+
+    sendcmd file format:
+        [time] [flags] target command arg
+    Each line: timestamp followed by filter name, command name, and value.
+    Flags: 'enter' (execute at this time) is default.
+
+    Returns path to temp file, or None if no effects.
+    """
+    beats = [b for b in beats if 0 <= b <= duration]
+    if not beats:
+        return None
+
+    lines = []
+
+    # ── Zoom pulse: zoompan zoom changes at each beat ──
+    if zoom_intensity > 0:
+        for beat in beats:
+            t = f"{beat:.3f}"
+            t_end = f"{min(beat + 0.15, duration):.3f}"
+            lines.append(f"{t} [enter] zoompan zoom {1.0 + zoom_intensity};")
+            lines.append(f"{t_end} [enter] zoompan zoom 1.0;")
+
+    # ── Flash: eq brightness pulse ──
+    if flash_intensity > 0:
+        flash_beats = beats[::2]
+        for beat in flash_beats:
+            t = f"{beat:.3f}"
+            t_end = f"{min(beat + 0.08, duration):.3f}"
+            lines.append(f"{t} [enter] eq brightness {flash_intensity * 0.5};")
+            lines.append(f"{t_end} [enter] eq brightness 0.0;")
+
+    # ── Shake: crop x offset oscillation ──
+    if shake_intensity > 0:
+        shake_beats = beats[::2]
+        shake_px = max(2, int(1080 * shake_intensity * 0.02))
+        for beat in shake_beats:
+            t = f"{beat:.3f}"
+            t_mid = f"{min(beat + 0.05, duration):.3f}"
+            t_end = f"{min(beat + 0.1, duration):.3f}"
+            lines.append(f"{t} [enter] crop x {shake_px};")
+            lines.append(f"{t_mid} [enter] crop x {-shake_px};")
+            lines.append(f"{t_end} [enter] crop x 0;")
+
+    if not lines:
+        return None
+
+    cmd_file = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".cmd", delete=False, prefix="beat_"
+    )
+    cmd_file.write("\n".join(lines) + "\n")
+    cmd_file.close()
+    logger.info(f"Beat cmd file: {len(lines)} commands for {len(beats)} beats → {cmd_file.name}")
+    return cmd_file.name
+
+
 def build_beat_filter(
     beats: list[float],
     duration: float,
@@ -38,57 +109,66 @@ def build_beat_filter(
     shake_intensity: float = 0.0,
 ) -> str:
     """
-    Build ffmpeg filter expression for beat-synced effects.
+    Build ffmpeg filter_complex expression for beat-synced effects.
 
-    Args:
-        beats: list of beat timestamps (seconds)
-        duration: total video duration (seconds)
-        video_w, video_h: output dimensions
-        energy_curve: RMS energy values (0-1) for drop detection
-        energy_times: timestamps for energy_curve
-        zoom_intensity: 0.0-0.2, overrides flag if > 0
-        flash_intensity: 0.0-0.5, overrides flag if > 0
-        shake_intensity: 0.0-0.3, overrides flag if > 0
-
-    Returns:
-        ffmpeg filter_complex string that can be inserted before subtitle burn.
-        Example: "zoompan=...,flash=...,shake=..."
-        Returns empty string if no effects enabled.
+    Uses sendcmd + simple filters instead of mega-expressions.
+    Returns the filter chain (without [0:v] prefix and without [vfx] suffix).
+    Returns empty string if no effects.
     """
     # Use explicit params if provided, else fall back to flags
     zoom_val = zoom_intensity if zoom_intensity > 0 else getattr(get_flags(), 'beat_zoom_intensity', 0)
     flash_val = flash_intensity if flash_intensity > 0 else getattr(get_flags(), 'beat_flash_intensity', 0)
     shake_val = shake_intensity if shake_intensity > 0 else getattr(get_flags(), 'beat_shake_intensity', 0)
 
+    if zoom_val == 0 and flash_val == 0 and shake_val == 0:
+        return ""
+
     # Filter beats to duration range
     beats = [b for b in beats if 0 <= b <= duration]
     if not beats:
         return ""
 
-    # Detect drops/peaks for flash effect
-    drop_times = _detect_drops(energy_curve, energy_times) if flash_val > 0 else beats
+    # Generate cmd file for sendcmd
+    cmd_file = generate_beat_cmd_file(
+        beats, duration, zoom_val, flash_val, shake_val
+    )
+    if not cmd_file:
+        return ""
+
+    # Build filter chain with sendcmd
+    # zoompan: default zoom=1.0, can be changed via sendcmd
+    # eq: brightness=0, changed via sendcmd for flash
+    # crop: x=0, changed via sendcmd for shake
 
     parts = []
 
-    # ── 1. Zoom pulse on every beat ──
+    # Zoom pulse via zoompan (sendcmd controls 'zoom' param)
     if zoom_val > 0:
-        zoom_expr = _build_zoom_expr(beats, duration, zoom_val, video_w, video_h)
-        if zoom_expr:
-            parts.append(zoom_expr)
+        parts.append(
+            f"zoompan=z='1.0':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"s={video_w}x{video_h}:fps=30"
+        )
 
-    # ── 2. Flash on drops/peaks ──
-    if flash_val > 0 and drop_times:
-        flash_expr = _build_flash_expr(drop_times, duration, flash_val)
-        if flash_expr:
-            parts.append(flash_expr)
+    # Flash via eq (sendcmd controls 'brightness')
+    if flash_val > 0:
+        parts.append("eq=brightness=0.0:contrast=1.0:saturation=1.0")
 
-    # ── 3. Camera shake on heavy beats ──
+    # Shake via crop (sendcmd controls 'x' offset)
     if shake_val > 0:
-        shake_expr = _build_shake_expr(beats, duration, shake_val, video_w, video_h)
-        if shake_expr:
-            parts.append(shake_expr)
+        shake_px = max(2, int(video_w * shake_val * 0.02))
+        crop_w = video_w - shake_px * 4
+        crop_h = video_h - shake_px * 4
+        parts.append(f"crop={crop_w}:{crop_h}:x=0:y=0")
+        parts.append(f"scale={video_w}:{video_h}")
 
-    return ",".join(p for p in parts if p)
+    filter_chain = ",".join(parts)
+
+    # Wrap with sendcmd
+    # sendcmd reads the cmd file and applies commands at timestamps
+    result = f"sendcmd=f={cmd_file},{filter_chain}"
+
+    logger.info(f"Beat filter: sendcmd + {len(parts)} filters for {len(beats)} beats")
+    return result
 
 
 def _detect_drops(
@@ -104,116 +184,9 @@ def _detect_drops(
     for i in range(2, len(energy_curve) - 2):
         prev = energy_curve[i - 1]
         curr = energy_curve[i]
-        # Sharp rise = drop coming
         if curr - prev > 0.15 and curr > avg * 1.2:
             drops.append(energy_times[i])
-    return drops[:20]  # max 20 flashes
-
-
-def _build_zoom_expr(
-    beats: list[float],
-    duration: float,
-    intensity: float,
-    video_w: int,
-    video_h: int,
-) -> str:
-    """
-    Build zoompan expression that pulses zoom on each beat.
-    Uses ffmpeg's zoompan filter with time-based zoom expression.
-
-    zoom = 1 + intensity * exp(-((t - beat_time) * decay)^2)
-    This creates a quick zoom-in that decays back to 1.0.
-    """
-    if not beats:
-        return ""
-
-    # Build a sum of gaussian bumps at each beat time
-    # zoom = 1 + intensity * sum(exp(-((t - beat) * 5)^2) for beat in beats)
-    decay = 6.0  # how fast zoom decays (higher = faster)
-
-    beat_terms = [f"exp(-((t-{b:.3f})*{decay})*(t-{b:.3f})*{decay})" for b in beats[:50]]
-    zoom_sum = "+".join(beat_terms)
-    zoom_expr = f"1+{intensity}*({zoom_sum})"
-
-    # zoompan needs 'z' (zoom factor) and output frame count
-    # We use time-based: each output frame maps to input time
-    fps = 30
-    total_frames = int(duration * fps)
-
-    return (
-        f"zoompan=z='{zoom_expr}':"
-        f"d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"s={video_w}x{video_h}:fps={fps}"
-    )
-
-
-def _build_flash_expr(
-    flash_times: list[float],
-    duration: float,
-    intensity: float,
-) -> str:
-    """
-    Build a flash effect using colorchannelmix with time-based alpha.
-    Creates a quick white flash at each timestamp.
-
-    Uses geq filter: luma = Y + flash_amount * exp(-((t - flash_time) * 10)^2)
-    """
-    if not flash_times:
-        return ""
-
-    decay = 12.0
-    flash_terms = [f"exp(-((t-{ft:.3f})*{decay})*(t-{ft:.3f})*{decay})" for ft in flash_times[:20]]
-    flash_sum = "+".join(flash_terms)
-
-    # geq filter: add white flash to luma channel
-    # lum_expr = Y + intensity * 255 * flash_sum (clamped by ffmpeg)
-    return (
-        f"geq=lum='Y+{intensity * 255}*({flash_sum})':"
-        f"cb='Cb':cr='Cr'"
-    )
-
-
-def _build_shake_expr(
-    beats: list[float],
-    duration: float,
-    intensity: float,
-    video_w: int,
-    video_h: int,
-) -> str:
-    """
-    Build camera shake effect using crop with oscillating offset.
-    shake = sin(t * freq) * amplitude, applied as crop offset.
-    """
-    if not beats:
-        return ""
-
-    # Shake amplitude (pixels)
-    shake_px = int(video_w * intensity * 0.02)  # max ~20px for intensity=1.0
-    if shake_px < 2:
-        return ""
-
-    # Apply shake on every 2nd beat (not too much)
-    shake_beats = beats[::2][:25]
-    if not shake_beats:
-        return ""
-
-    # Build time-based shake: oscillate with decaying amplitude after each beat
-    shake_terms = []
-    for b in shake_beats:
-        # decay envelope * sine wave
-        env = f"exp(-((t-{b:.3f})*3)*(t-{b:.3f})*3)"
-        shake_terms.append(f"{env}*sin(t*30)*{shake_px}")
-
-    shake_x = "+".join(shake_terms)
-    shake_y = shake_x.replace("sin(t*30)", "cos(t*25)")
-
-    # crop with dynamic offset
-    crop_w = video_w - shake_px * 4
-    crop_h = video_h - shake_px * 4
-    return (
-        f"crop={crop_w}:{crop_h}:x='{shake_x}':y='{shake_y}',"
-        f"scale={video_w}:{video_h}"
-    )
+    return drops[:20]
 
 
 def build_beat_filter_safe(
