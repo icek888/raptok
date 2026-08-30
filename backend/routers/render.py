@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 @router.post("/api/render")
-async def api_render(req: RenderRequest):
+async def api_render(req: RenderRequest, request):
     """Render the final TikTok clip."""
     try:
         fragments = parse_fragments(req.fragments)
@@ -81,6 +81,29 @@ async def api_render(req: RenderRequest):
                     os.unlink(tmp_audio)
             except Exception:
                 pass
+
+        # ── Save render to database ──
+        try:
+            from services import database
+            from routers.auth import SESSION_COOKIE, _verify_token
+            import os as _os
+            file_size = 0
+            if output_path and _os.path.exists(output_path):
+                file_size = _os.path.getsize(output_path)
+            total_dur = sum(f.duration for f in fragments)
+            token = request.cookies.get(SESSION_COOKIE)
+            if token:
+                session = _verify_token(token)
+                if session:
+                    database.save_render(
+                        user=session["username"],
+                        filename=os.path.basename(output_path),
+                        output_path=output_path,
+                        duration=total_dur,
+                        file_size=file_size,
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to save render to DB: {e}")
 
         return {
             "status": "completed",

@@ -28,6 +28,38 @@ async function postForm(url: string, form: FormData): Promise<any> {
   return res.json();
 }
 
+async function getJSON(url: string): Promise<any> {
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function putJSON(url: string, body: unknown): Promise<any> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function delJSON(url: string): Promise<any> {
+  const res = await fetch(url, { method: 'DELETE', credentials: 'include' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   health: () => fetch(`${API_BASE.replace('/api', '/health')}`).then(r => r.json()),
 
@@ -268,6 +300,30 @@ export const api = {
 
   snapToBeats: (fragments: any[], beats: number[]): Promise<any> =>
     postJSON(`${API_BASE}/features/snap-to-beats`, { fragments, beats }),
+
+  // ── Projects ──
+  listProjects: () => getJSON(`${API_BASE}/projects`),
+  createProject: () => postJSON(`${API_BASE}/projects`, {}),
+  getProject: (id: string) => getJSON(`${API_BASE}/projects/${id}`),
+  saveProject: (id: string, data: any) => putJSON(`${API_BASE}/projects/${id}`, data),
+  deleteProject: (id: string) => delJSON(`${API_BASE}/projects/${id}`),
+
+  // ── Renders ──
+  listRenders: () => getJSON(`${API_BASE}/renders`),
+  deleteRender: (id: string) => delJSON(`${API_BASE}/renders/${id}`),
+
+  // ── Presets ──
+  listPresets: () => getJSON(`${API_BASE}/presets`),
+  createPreset: (name: string, styleJson: string, templateId?: string) =>
+    postJSON(`${API_BASE}/presets`, { name, style_json: styleJson, template_id: templateId }),
+  deletePreset: (id: string) => delJSON(`${API_BASE}/presets/${id}`),
+
+  // ── Settings ──
+  getSettings: () => getJSON(`${API_BASE}/settings`),
+  updateSettings: (data: any) => putJSON(`${API_BASE}/settings`, data),
+
+  // ── Stats ──
+  getStats: () => getJSON(`${API_BASE}/stats`),
 };
 
 function createThumbnailForm(videoPath: string, timestamps: number[]): FormData {

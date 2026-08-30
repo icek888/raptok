@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Film, Scissors, Type, Wand2, Music, Eye, LogOut } from 'lucide-react';
+import { Film, Scissors, Type, Wand2, Music, Eye, LogOut, LayoutDashboard } from 'lucide-react';
 import { InputPanel } from './components/InputPanel';
 import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
@@ -8,6 +8,7 @@ import { RenderPanel } from './components/RenderPanel';
 import { CutToolsPanel } from './components/CutToolsPanel';
 import { BeatEffectsPanel } from './components/BeatEffectsPanel';
 import { Login } from './components/Login';
+import { Dashboard } from './components/Dashboard';
 import { defaultStyle, api } from './api/client';
 import type { VideoInfo, Fragment, SubtitleLine, SubtitleStyle, WordTiming, BPMResult, TrackAnalysis } from './types';
 
@@ -46,6 +47,7 @@ function App() {
   const [zoomIntensity, setZoomIntensity] = useState(0.08);
   const [flashIntensity, setFlashIntensity] = useState(0.3);
   const [shakeIntensity, setShakeIntensity] = useState(0);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -163,6 +165,14 @@ function App() {
                 <span className="text-xs text-gray-500">BPM</span>
               </div>
             )}
+
+            <button
+              onClick={() => setShowDashboard(true)}
+              className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-purple-400 transition px-2 py-1 rounded-lg hover:bg-white/5"
+              title="Dashboard"
+            >
+              <LayoutDashboard size={16} />
+            </button>
 
             <span className="text-xs text-gray-500">{username}</span>
             <button
@@ -356,6 +366,17 @@ function App() {
             </button>
           </div>
         )}
+
+      {showDashboard && (
+        <Dashboard
+          username={username}
+          onClose={() => setShowDashboard(false)}
+          onNewProject={() => {
+            setShowDashboard(false);
+            setStep(0);
+          }}
+        />
+      )}
       </div>
         </>
       )}
