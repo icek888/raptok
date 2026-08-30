@@ -14,7 +14,13 @@ async function postJSON(url: string, body: unknown): Promise<any> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    let msg = err.detail || `HTTP ${res.status}`;
+    if (Array.isArray(msg)) {
+      msg = msg.map((e: any) => e.msg || JSON.stringify(e)).join('; ');
+    } else if (typeof msg === 'object') {
+      msg = JSON.stringify(msg);
+    }
+    throw new Error(msg);
   }
   return res.json();
 }

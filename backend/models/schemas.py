@@ -28,9 +28,13 @@ class VideoInfo(BaseModel):
 class Fragment(BaseModel):
     id: int
     start: float
-    end: float
+    end: float = 0.0
     duration: float
     thumbnail: Optional[str] = None
+
+    def model_post_init(self, __context):
+        if self.end == 0.0 and self.duration > 0:
+            self.end = self.start + self.duration
 
 
 class FragmentSelection(BaseModel):

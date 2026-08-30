@@ -3,7 +3,7 @@ import os
 import logging
 import tempfile
 import subprocess
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from config import TEMP_DIR
 from models.schemas import (
     RenderRequest, SubtitleLine, Fragment,
@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 @router.post("/api/render")
-async def api_render(req: RenderRequest, request):
+async def api_render(request: Request, req: RenderRequest):
     """Render the final TikTok clip."""
     try:
         # ── Quota check ──
