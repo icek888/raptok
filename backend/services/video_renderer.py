@@ -156,54 +156,12 @@ def render_clip(
     # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
     # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
     #
-    # Beat effects (zoompan/crop/scale) are inserted BEFORE the video mode
-    # filter so they operate on the raw concat video, then blur/overlay/subtitles
-    # are applied on top of the effect-processed video.
+    # Beat effects (zoom/flash/shake) are applied AFTER the composite (overlay)
+    # on the final 1080x1920 frame, so effects are visible at full resolution.
+    # If applied before scale-down, zoom 30% becomes invisible on small foreground.
     
-    # For beat effects, we need to split the input and apply effects to the
-    # foreground video, then feed it into the video_mode filter chain.
-    if beat_effect_filter:
-        # Beat effects active: apply to input video first, then use as [0:v]
-        # We prepend the beat filter as a separate stream and reference it.
-        if video_mode == "crop_fill":
-            # crop_fill: beat effects + full-screen + subtitles
-            scale_filter = (
-                f"[0:v]{beat_effect_filter}[vfx];"
-                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
-                f"subtitles={ass_path}[final]"
-            )
-        elif video_mode == "fit_blur_dark":
-            scaled_w = int(OUTPUT_WIDTH * scale_factor)
-            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
-            scale_filter = (
-                # Apply beat effects to input, then split for bg+fg
-                f"[0:v]{beat_effect_filter}[vfx];"
-                # BG: vfx zoomed + blurred + darkened
-                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
-                f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
-                # FG: vfx scaled down (clear)
-                f"[vfx]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
-                f"[withbg]subtitles={ass_path}[final]"
-            )
-        else:
-            # fit_blur (default): beat effects + blurred bg
-            scaled_w = int(OUTPUT_WIDTH * scale_factor)
-            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
-            scale_filter = (
-                # Apply beat effects to input video
-                f"[0:v]{beat_effect_filter}[vfx];"
-                # BG: vfx zoomed + blurred
-                f"[vfx]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
-                # FG: vfx scaled down (clear)
-                f"[vfx]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
-                f"[withbg]subtitles={ass_path}[final]"
-            )
-    elif video_mode == "crop_fill":
+    # Build the base composite filter (without beat effects)
+    if video_mode == "crop_fill":
         # Full-screen zoomed video — no blur, no bars
         scale_filter = (
             f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
@@ -242,6 +200,12 @@ def render_clip(
             f"[withbg]subtitles={ass_path}[final]"
         )
     
+    # Apply beat effects AFTER subtitle burn — on the final 1080x1920 frame.
+    # This way zoom/flash/shake operate at full resolution and are clearly visible.
+    if beat_effect_filter:
+        scale_filter = scale_filter.replace("[final]", "[composed]")
+        scale_filter += f";[composed]{beat_effect_filter}[final]"
+
     cmd = [
         "ffmpeg", "-y",
         "-i", str(concat_path),
@@ -259,7 +223,11 @@ def render_clip(
         "-movflags", "+faststart",
         str(output_path)
     ]
+    logger.info(f"ffmpeg filter_complex: {scale_filter[:500]}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        logger.error(f"ffmpeg cmd: {' '.join(cmd[:10])}... filter_complex={scale_filter[:300]}")
+        logger.error(f"ffmpeg stderr (last 2000): {result.stderr[-2000:]}")
     
     # Clean up work dir
     shutil.rmtree(work_dir, ignore_errors=True)
