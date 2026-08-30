@@ -95,6 +95,7 @@ export const api = {
     displayMode: string = 'line_highlight',
     templateId: string = '',
     wordTimings?: WordTiming[],
+    beatEffects?: { enabled: boolean; beats: number[]; zoom: number; flash: number; shake: number; energyCurve?: number[]; energyTimes?: number[] },
   ): Promise<RenderResult> =>
     postJSON(`${API_BASE}/render`, {
       video_path: videoPath,
@@ -107,6 +108,13 @@ export const api = {
       display_mode: displayMode,
       template_id: templateId,
       word_timings: wordTimings || null,
+      beat_effects_enabled: beatEffects?.enabled || false,
+      beats: beatEffects?.beats || null,
+      zoom_intensity: beatEffects?.zoom || 0,
+      flash_intensity: beatEffects?.flash || 0,
+      shake_intensity: beatEffects?.shake || 0,
+      energy_curve: beatEffects?.energyCurve || null,
+      energy_times: beatEffects?.energyTimes || null,
     }),
 
   getTemplates: (): Promise<{ templates: RenderTemplate[] }> =>

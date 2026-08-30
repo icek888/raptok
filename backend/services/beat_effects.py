@@ -33,6 +33,9 @@ def build_beat_filter(
     video_h: int = 1920,
     energy_curve: list[float] | None = None,
     energy_times: list[float] | None = None,
+    zoom_intensity: float = 0.0,
+    flash_intensity: float = 0.0,
+    shake_intensity: float = 0.0,
 ) -> str:
     """
     Build ffmpeg filter expression for beat-synced effects.
@@ -43,15 +46,19 @@ def build_beat_filter(
         video_w, video_h: output dimensions
         energy_curve: RMS energy values (0-1) for drop detection
         energy_times: timestamps for energy_curve
+        zoom_intensity: 0.0-0.2, overrides flag if > 0
+        flash_intensity: 0.0-0.5, overrides flag if > 0
+        shake_intensity: 0.0-0.3, overrides flag if > 0
 
     Returns:
         ffmpeg filter_complex string that can be inserted before subtitle burn.
         Example: "zoompan=...,flash=...,shake=..."
         Returns empty string if no effects enabled.
     """
-    flags = get_flags()
-    if not has_beat_effects():
-        return ""
+    # Use explicit params if provided, else fall back to flags
+    zoom_val = zoom_intensity if zoom_intensity > 0 else getattr(get_flags(), 'beat_zoom_intensity', 0)
+    flash_val = flash_intensity if flash_intensity > 0 else getattr(get_flags(), 'beat_flash_intensity', 0)
+    shake_val = shake_intensity if shake_intensity > 0 else getattr(get_flags(), 'beat_shake_intensity', 0)
 
     # Filter beats to duration range
     beats = [b for b in beats if 0 <= b <= duration]
@@ -59,25 +66,25 @@ def build_beat_filter(
         return ""
 
     # Detect drops/peaks for flash effect
-    drop_times = _detect_drops(energy_curve, energy_times) if flags.beat_flash_on_drop else beats
+    drop_times = _detect_drops(energy_curve, energy_times) if flash_val > 0 else beats
 
     parts = []
 
     # ── 1. Zoom pulse on every beat ──
-    if flags.beat_zoom_intensity > 0:
-        zoom_expr = _build_zoom_expr(beats, duration, flags.beat_zoom_intensity, video_w, video_h)
+    if zoom_val > 0:
+        zoom_expr = _build_zoom_expr(beats, duration, zoom_val, video_w, video_h)
         if zoom_expr:
             parts.append(zoom_expr)
 
     # ── 2. Flash on drops/peaks ──
-    if flags.beat_flash_intensity > 0 and drop_times:
-        flash_expr = _build_flash_expr(drop_times, duration, flags.beat_flash_intensity)
+    if flash_val > 0 and drop_times:
+        flash_expr = _build_flash_expr(drop_times, duration, flash_val)
         if flash_expr:
             parts.append(flash_expr)
 
     # ── 3. Camera shake on heavy beats ──
-    if flags.beat_shake_intensity > 0:
-        shake_expr = _build_shake_expr(beats, duration, flags.beat_shake_intensity, video_w, video_h)
+    if shake_val > 0:
+        shake_expr = _build_shake_expr(beats, duration, shake_val, video_w, video_h)
         if shake_expr:
             parts.append(shake_expr)
 
@@ -216,13 +223,20 @@ def build_beat_filter_safe(
     video_h: int = 1920,
     energy_curve: list[float] | None = None,
     energy_times: list[float] | None = None,
+    zoom_intensity: float = 0.0,
+    flash_intensity: float = 0.0,
+    shake_intensity: float = 0.0,
 ) -> str:
     """
     Safe wrapper — returns empty string on any error.
     Beat effects should never crash the render.
     """
     try:
-        return build_beat_filter(beats, duration, video_w, video_h, energy_curve, energy_times)
+        return build_beat_filter(
+            beats, duration, video_w, video_h,
+            energy_curve, energy_times,
+            zoom_intensity, flash_intensity, shake_intensity,
+        )
     except Exception as e:
         logger.warning(f"Beat effects failed (non-fatal): {e}")
         return ""

@@ -324,6 +324,15 @@ function App() {
               karaoke={karaoke}
               displayMode={displayMode}
               templateId={templateId}
+              beatEffects={beatEffectsOn ? {
+                enabled: true,
+                beats: bpmData?.beats || [],
+                zoom: zoomIntensity,
+                flash: flashIntensity,
+                shake: shakeIntensity,
+                energyCurve: trackAnalysis?.energy_curve,
+                energyTimes: trackAnalysis?.energy_times,
+              } : undefined}
             />
           )}
         </div>

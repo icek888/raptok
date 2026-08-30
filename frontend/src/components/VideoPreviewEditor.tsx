@@ -53,11 +53,19 @@ export function VideoPreviewEditor({
   const [preparing, setPreparing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
-  // ── Prepare preview clip when entering Step 3 ──
+  // ── Prepare preview clip when entering Step 3 OR when data changes ──
   // Backend concats selected video fragments + audio fragments into one clip.
   // Word timings and subtitles are shifted to 0-based relative to the concat clip.
+  // We track a "data version" to detect content changes (not just array length).
+  const [dataVersion, setDataVersion] = useState(0);
+
+  // Bump dataVersion whenever subtitles or wordTimings content changes
+  // (not just length — actual word text/timings may change)
+  const subsKey = JSON.stringify(subtitles.map(s => ({ id: s.id, start: s.start, end: s.end, text: s.text, words: s.words?.map(w => `${w.word}@${w.start}-${w.end}`) })));
+  const wordsKey = JSON.stringify(wordTimings.map(w => `${w.word}@${w.start}-${w.end}`));
+
   useEffect(() => {
-    if (!videoUrl || fragments.length === 0 || previewData) return;
+    if (!videoUrl || fragments.length === 0) return;
     if (wordTimings.length === 0 && subtitles.length === 0) return;
 
     setPreparing(true);
@@ -83,7 +91,7 @@ export function VideoPreviewEditor({
     }).then(r => r.json()).then(data => {
       setPreviewData(data);
       setPreparing(false);
-      console.log('[Preview] Concat data:', {
+      console.log('[Preview] Concat data (v' + dataVersion + '):', {
         subs: data.subtitles?.length || 0,
         words: data.word_timings?.length || 0,
         duration: data.duration,
@@ -95,7 +103,12 @@ export function VideoPreviewEditor({
       setPreparing(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoUrl, fragments.length, wordTimings.length, subtitles.length]);
+  }, [videoUrl, fragments.length, dataVersion, audioStart]);
+
+  // Bump dataVersion when subtitle/word content changes
+  useEffect(() => {
+    setDataVersion(v => v + 1);
+  }, [subsKey, wordsKey]);
 
   // Templates loaded via useTemplates() hook (cached)
 

@@ -27,6 +27,13 @@ def render_clip(
     karaoke: bool = False,
     display_mode: str = "line_highlight",
     template: dict | None = None,
+    beat_effects_enabled: bool = False,
+    beats: list[float] | None = None,
+    zoom_intensity: float = 0.0,
+    flash_intensity: float = 0.0,
+    shake_intensity: float = 0.0,
+    energy_curve: list[float] | None = None,
+    energy_times: list[float] | None = None,
 ) -> str:
     """
     Render a TikTok-format clip (1080x1920) from fragments with subtitles and custom audio.
@@ -125,25 +132,24 @@ def render_clip(
     
     # ── Beat-synced effects (optional, modular) ──
     beat_effect_filter = ""
-    try:
-        from services.beat_effects import build_beat_filter_safe
-        # Try to get beats from template or request
-        beats = template.get("beats", []) if template else []
-        energy_curve = template.get("energy_curve", []) if template else []
-        energy_times = template.get("energy_times", []) if template else []
-        if beats:
+    if beat_effects_enabled and beats:
+        try:
+            from services.beat_effects import build_beat_filter_safe
             # Get concat duration for beat effect timing
             concat_dur = sum(f.duration for f in fragments)
             beat_effect_filter = build_beat_filter_safe(
                 beats, concat_dur,
                 video_w=OUTPUT_WIDTH, video_h=OUTPUT_HEIGHT,
-                energy_curve=energy_curve, energy_times=energy_times,
+                energy_curve=energy_curve or [], energy_times=energy_times or [],
+                zoom_intensity=zoom_intensity,
+                flash_intensity=flash_intensity,
+                shake_intensity=shake_intensity,
             )
             if beat_effect_filter:
-                logger.info(f"Beat effects applied: {len(beats)} beats")
-    except Exception as e:
-        logger.warning(f"Beat effects skipped: {e}")
-        beat_effect_filter = ""
+                logger.info(f"Beat effects applied: {len(beats)} beats, zoom={zoom_intensity}, flash={flash_intensity}, shake={shake_intensity}")
+        except Exception as e:
+            logger.warning(f"Beat effects skipped: {e}")
+            beat_effect_filter = ""
     
     # Build scale filter based on video_mode:
     # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)

@@ -15,9 +15,10 @@ interface Props {
   karaoke: boolean;
   displayMode: string;
   templateId?: string;
+  beatEffects?: { enabled: boolean; beats: number[]; zoom: number; flash: number; shake: number; energyCurve?: number[]; energyTimes?: number[] };
 }
 
-export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, wordTimings, style, karaoke, displayMode, templateId }: Props) {
+export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, wordTimings, style, karaoke, displayMode, templateId, beatEffects }: Props) {
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
     setError(null);
     setResult(null);
     try {
-      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '', wordTimings);
+      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '', wordTimings, beatEffects);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Render failed');

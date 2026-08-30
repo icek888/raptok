@@ -65,6 +65,13 @@ async def api_render(req: RenderRequest):
             karaoke=req.karaoke,
             display_mode=req.display_mode,
             template=template_dict,
+            beat_effects_enabled=req.beat_effects_enabled,
+            beats=req.beats or [],
+            zoom_intensity=req.zoom_intensity,
+            flash_intensity=req.flash_intensity,
+            shake_intensity=req.shake_intensity,
+            energy_curve=req.energy_curve or [],
+            energy_times=req.energy_times or [],
         )
 
         # Cleanup temp audio

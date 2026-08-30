@@ -104,14 +104,22 @@ def smart_cut(
     peak_times = []
     if energy_curve and energy_times and len(energy_curve) > 10:
         avg = sum(energy_curve) / len(energy_curve)
-        # Find peaks above average
+        # Find peaks above average (lowered threshold from 1.3 to 1.1 for more peaks)
         for i in range(2, len(energy_curve) - 2):
-            if (energy_curve[i] > avg * 1.3
+            if (energy_curve[i] > avg * 1.1
                 and energy_curve[i] >= energy_curve[i-1]
                 and energy_curve[i] >= energy_curve[i+1]):
                 peak_times.append(energy_times[i])
 
-    # If not enough peaks, use evenly spaced beats
+    # If not enough peaks, try lower threshold
+    if len(peak_times) < count and energy_curve and energy_times and len(energy_curve) > 10:
+        peak_times = []
+        avg = sum(energy_curve) / len(energy_curve)
+        for i in range(1, len(energy_curve) - 1):
+            if energy_curve[i] > avg:  # any above-average moment
+                peak_times.append(energy_times[i])
+
+    # If still not enough, use evenly spaced beats (but prefer energy peaks)
     if len(peak_times) < count:
         # Pick evenly spaced beats
         step = max(1, len(beats) // count)

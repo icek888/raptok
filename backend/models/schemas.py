@@ -201,6 +201,14 @@ class RenderRequest(BaseModel):
     display_mode: str = "line_highlight"
     template_id: str = ""  # If set, overrides style/display_mode with template
     word_timings: Optional[list[dict]] = None  # Edited word timings from UI
+    # Beat effects (optional)
+    beat_effects_enabled: bool = False
+    beats: Optional[list[float]] = None  # Beat timestamps for zoom/flash/shake
+    zoom_intensity: float = 0.0   # 0.0-0.2
+    flash_intensity: float = 0.0  # 0.0-0.5
+    shake_intensity: float = 0.0 # 0.0-0.3
+    energy_curve: Optional[list[float]] = None
+    energy_times: Optional[list[float]] = None
 
 
 class PreparePreviewRequest(BaseModel):
