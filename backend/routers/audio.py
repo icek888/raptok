@@ -141,16 +141,36 @@ async def api_auto_cut_by_audio(
         # If clip range provided, that defines the target duration
         target_duration = clip_length if clip_length > 0 else audio_duration
 
-        # Get BPM + beats
+        # Get BPM + beats — filter beats to clip range for accurate snapping
         bpm_data = detect_bpm(audio_path)
-        beats = bpm_data["beats"]
+        all_beats = bpm_data["beats"]
         bpm = bpm_data["bpm"]
+        # Filter beats to clip range: [clip_start, clip_start + target_duration]
+        if clip_start > 0 and target_duration > 0:
+            clip_end_time = clip_start + target_duration
+            beats = [b for b in all_beats if clip_start <= b <= clip_end_time]
+            # Shift beats to 0-based (relative to clip start)
+            beats = [round(b - clip_start, 3) for b in beats]
+        else:
+            beats = all_beats
 
-        # Get energy curve
+        # Get energy curve — filter to clip range
         try:
             track_data = analyze_track(audio_path)
-            energy_curve = track_data.get("energy_curve", [])
-            energy_times = track_data.get("energy_times", [])
+            all_energy = track_data.get("energy_curve", [])
+            all_energy_times = track_data.get("energy_times", [])
+            # Filter to clip range
+            if clip_start > 0 and target_duration > 0:
+                clip_end_time = clip_start + target_duration
+                energy_curve = []
+                energy_times = []
+                for i, t in enumerate(all_energy_times):
+                    if clip_start <= t <= clip_end_time:
+                        energy_curve.append(all_energy[i])
+                        energy_times.append(round(t - clip_start, 3))
+            else:
+                energy_curve = all_energy
+                energy_times = all_energy_times
         except Exception:
             energy_curve = []
             energy_times = []
