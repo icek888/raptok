@@ -315,12 +315,14 @@ export const api = {
   },
 
   // ── Auto Cut by Audio ──
-  autoCutByAudio: (audioPath: string, videoDuration: number, minFrag = 3, maxFrag = 6) => {
+  autoCutByAudio: (audioPath: string, videoDuration: number, minFrag = 3, maxFrag = 6, clipStart = 0, clipLength = 0) => {
     const form = new FormData();
     form.append('audio_path', audioPath);
     form.append('video_duration', String(videoDuration));
     form.append('min_frag', String(minFrag));
     form.append('max_frag', String(maxFrag));
+    form.append('clip_start', String(clipStart));
+    form.append('clip_length', String(clipLength));
     return postForm('/api/auto-cut-by-audio', form);
   },
 

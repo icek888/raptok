@@ -153,6 +153,38 @@ def smart_cut(
                 "duration": round(actual_dur, 3),
             })
 
+    # ── De-overlap: sort by start, shift/trim overlapping fragments ──
+    # Energy peaks can be close together → raw fragments overlap
+    # (e.g. [25.1, 29.3] and [28.1, 32.4]). Video concat would repeat footage.
+    fragments.sort(key=lambda f: f["start"])
+    non_overlapping: list[dict] = []
+    for frag in fragments:
+        if non_overlapping:
+            prev = non_overlapping[-1]
+            if frag["start"] < prev["end"]:
+                # Overlap with previous fragment
+                if frag["end"] <= prev["end"]:
+                    continue  # fully inside previous — drop
+                # Shift start to prev end; keep duration if possible
+                new_start = prev["end"]
+                new_end = new_start + frag["duration"]
+                if new_end > duration:
+                    # Not enough room — trim
+                    new_end = duration
+                    if new_end - new_start < 1.0:
+                        continue  # too short — drop
+                frag = {
+                    "id": 0,  # renumbered below
+                    "start": round(new_start, 3),
+                    "end": round(new_end, 3),
+                    "duration": round(new_end - new_start, 3),
+                }
+        non_overlapping.append(frag)
+
+    fragments = non_overlapping
+    for i, frag in enumerate(fragments):
+        frag["id"] = i
+
     logger.info(f"Smart cut: {len(fragments)} fragments from {len(beats)} beats, {len(peak_times)} peaks")
     return fragments
 

@@ -42,7 +42,7 @@ function App() {
   const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(null);
   const [whisperText, setWhisperText] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [whisperLoading, setWhisperLoading] = useState(false);
+  const [whisperLoading] = useState(false);
 
   // Lyrics (Step 2)
   const [lyrics, setLyrics] = useState('');
@@ -54,6 +54,7 @@ function App() {
   const [templateId, setTemplateId] = useState('');
   const [beatDivision, setBeatDivision] = useState('1/4');
   const [audioStart, setAudioStart] = useState(0);
+  const [clipRange, setClipRange] = useState<{ start: number; end: number } | null>(null);
 
   // Video (Step 3)
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
@@ -100,46 +101,18 @@ function App() {
     setStep(1); // Auto-advance to Analysis
   };
 
-  // ── Step 1: Auto-analysis when audio is loaded ──
+  // ── Step 1: Auto-analysis when audio is loaded (BPM + mood only, NO transcription) ──
   const analysisStarted = useRef(false);
   useEffect(() => {
     if (audioPath && step === 1 && !analysisStarted.current) {
       analysisStarted.current = true;
       setAnalysisLoading(true);
 
-      // Parallel: BPM + track analysis + WhisperX
+      // Parallel: BPM + track analysis (transcription is manual on Lyrics step)
       Promise.all([
         api.detectBPM(audioPath).then((d: BPMResult) => setBpmData(d)).catch(e => console.error('BPM failed:', e)),
         api.trackAnalysis(audioPath).then((d: TrackAnalysis) => setTrackAnalysis(d)).catch(e => console.error('Track analysis failed:', e)),
       ]).finally(() => setAnalysisLoading(false));
-
-      // WhisperX in background (slower)
-      setWhisperLoading(true);
-      const form = new FormData();
-      form.append('audio_path', audioPath);
-      form.append('language', 'en');
-      fetch('/api/transcribe-full', { method: 'POST', body: form, credentials: 'include' })
-        .then(r => r.json())
-        .then(async data => {
-          setWhisperText(data.text || '');
-          const words: WordTiming[] = data.words || [];
-          setWordTimings(words);
-
-          // ── Auto-generate karaoke subtitles from word timings ──
-          // word-split works with absolute timestamps, fragments not required
-          if (words.length > 0) {
-            try {
-              const subResult = await api.wordSplitSubtitles(
-                data.text || '', [], words, 0
-              );
-              setSubtitles(subResult.subtitles);
-            } catch (e) {
-              console.error('Auto subtitle generation failed:', e);
-            }
-          }
-        })
-        .catch(e => console.error('WhisperX failed:', e))
-        .finally(() => setWhisperLoading(false));
     }
   }, [audioPath, step]);
 
@@ -157,12 +130,13 @@ function App() {
     }
   };
 
-  // ── Step 3: Video analyzed ──
-  const handleVideoAnalyzed = (info: VideoInfo) => {
-    setVideoInfo(info);
-    // Auto-trigger auto-cut by audio when video is loaded
-    if (audioPath && info.duration) {
-      api.autoCutByAudio(audioPath, info.duration)
+  // ── Step 2: Lyrics range selected → this defines the clip length ──
+  const handleClipRangeChange = (start: number, end: number) => {
+    setClipRange({ start, end });
+    // If video is already loaded, re-run auto-cut with the new range length
+    if (videoInfo && audioPath && end > start) {
+      const clipLength = end - start;
+      api.autoCutByAudio(audioPath, videoInfo.duration, 3, 6, start, clipLength)
         .then((data: any) => {
           if (data.fragments?.length) {
             setFragments(data.fragments.map((f: any, i: number) => ({
@@ -171,6 +145,26 @@ function App() {
           }
         })
         .catch(e => console.error('Auto-cut failed:', e));
+    }
+  };
+
+  // ── Step 3: Video analyzed ──
+  const handleVideoAnalyzed = (info: VideoInfo) => {
+    setVideoInfo(info);
+    // Auto-cut: fragment total duration = selected clip range (not whole track)
+    if (audioPath) {
+      const clipLength = clipRange ? clipRange.end - clipRange.start : null;
+      if (clipLength && clipLength > 0) {
+        api.autoCutByAudio(audioPath, info.duration, 3, 6, clipRange!.start, clipLength)
+          .then((data: any) => {
+            if (data.fragments?.length) {
+              setFragments(data.fragments.map((f: any, i: number) => ({
+                id: i, start: f.start, end: f.end, duration: f.duration
+              })));
+            }
+          })
+          .catch(e => console.error('Auto-cut failed:', e));
+      }
     }
   };
 
@@ -342,6 +336,7 @@ function App() {
                 onDisplayModeChange={setDisplayMode}
                 videoUrl={null}
                 onAudioStartChange={setAudioStart}
+                onRangeChange={handleClipRangeChange}
                 style={style}
                 onStyleChange={setStyle}
                 templateId={templateId}

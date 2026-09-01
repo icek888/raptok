@@ -33,6 +33,7 @@ interface Props {
   onApplyTemplate?: (templateId: string) => void;
   onLyricsChange?: (text: string) => void;
   autoDetectedText?: string;
+  onRangeChange?: (start: number, end: number) => void;
 }
 
 export function SubtitleEditor({
@@ -45,6 +46,7 @@ export function SubtitleEditor({
   templateId, onTemplateChange,
   onApplyStyle, onApplyTemplate,
   onLyricsChange: _onLyricsChange, autoDetectedText: _autoDetectedText,
+  onRangeChange,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
@@ -113,11 +115,17 @@ export function SubtitleEditor({
     onAudioStartChange?.(audioStart);
   }, [audioStart, onAudioStartChange]);
 
-  // ── Audio playback tracking ──
+  // ── Audio playback tracking + LOOP within selected range [audioStart, audioEnd] ──
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const onTime = () => setPlayTime(audio.currentTime);
+    const onTime = () => {
+      setPlayTime(audio.currentTime);
+      // Loop: when playback reaches the end of the selected range → jump back to range start
+      if (audioEnd > audioStart && audio.currentTime >= audioEnd) {
+        audio.currentTime = audioStart;
+      }
+    };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
     audio.addEventListener('timeupdate', onTime);
@@ -128,7 +136,7 @@ export function SubtitleEditor({
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
     };
-  }, [audioUrl]);
+  }, [audioUrl, audioStart, audioEnd]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -190,6 +198,7 @@ export function SubtitleEditor({
   const handleRangeChange = (start: number, end: number) => {
     setAudioStart(start);
     setAudioEnd(end);
+    onRangeChange?.(start, end);
     
     if (hasFullTranscription && fullTrackWords.length > 0) {
       // Filter locally — instant, no server round-trip

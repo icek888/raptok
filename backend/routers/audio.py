@@ -119,11 +119,17 @@ async def api_auto_cut_by_audio(
     video_duration: float = Form(...),
     min_frag: float = Form(3.0),
     max_frag: float = Form(6.0),
+    clip_start: float = Form(0.0),
+    clip_length: float = Form(0.0),
 ):
     """
     Auto-cut video into fragments that exactly match audio duration.
     Uses beats + energy peaks. Fragment count is auto-calculated from
     audio duration and BPM.
+
+    If clip_start/clip_length provided, fragments match only that part
+    of the track (selected on the Lyrics timeline), and word timings
+    stay aligned to the full track.
     """
     try:
         import librosa
@@ -131,6 +137,9 @@ async def api_auto_cut_by_audio(
 
         # Get audio duration
         audio_duration = librosa.get_duration(path=audio_path)
+
+        # If clip range provided, that defines the target duration
+        target_duration = clip_length if clip_length > 0 else audio_duration
 
         # Get BPM + beats
         bpm_data = detect_bpm(audio_path)
@@ -149,15 +158,15 @@ async def api_auto_cut_by_audio(
         # Auto-calculate fragment count:
         # beats_per_fragment = 8 (2 bars at 4/4)
         # fragment_duration ≈ 8 * 60/bpm
-        # count = audio_duration / fragment_duration
+        # count = target_duration / fragment_duration
         if bpm > 0:
             beats_per_frag = 8
             ideal_frag_dur = beats_per_frag * 60.0 / bpm
             ideal_frag_dur = max(min_frag, min(max_frag, ideal_frag_dur))
-            count = max(3, min(12, int(audio_duration / ideal_frag_dur)))
+            count = max(3, min(12, int(target_duration / ideal_frag_dur)))
         else:
             ideal_frag_dur = (min_frag + max_frag) / 2
-            count = max(3, min(12, int(audio_duration / ideal_frag_dur)))
+            count = max(3, min(12, int(target_duration / ideal_frag_dur)))
 
         # Use smart_cut to get fragments from energy peaks + beats
         fragments = smart_cut(
@@ -174,18 +183,18 @@ async def api_auto_cut_by_audio(
         if fragments and beats:
             fragments = snap_to_beats(fragments, beats)
 
-        # Ensure total duration matches audio duration (trim or extend last fragment)
+        # Ensure total duration matches target duration (trim or extend last fragment)
         if fragments:
             total = sum(f["duration"] for f in fragments)
-            if total > audio_duration:
+            if total > target_duration:
                 # Trim last fragment
-                excess = total - audio_duration
+                excess = total - target_duration
                 last = fragments[-1]
                 last["end"] = round(last["end"] - excess, 3)
                 last["duration"] = round(last["duration"] - excess, 3)
-            elif total < audio_duration:
+            elif total < target_duration:
                 # Extend last fragment
-                deficit = audio_duration - total
+                deficit = target_duration - total
                 last = fragments[-1]
                 last["end"] = round(last["end"] + deficit, 3)
                 last["duration"] = round(last["duration"] + deficit, 3)
@@ -194,6 +203,8 @@ async def api_auto_cut_by_audio(
             "fragments": fragments,
             "total_duration": round(sum(f["duration"] for f in fragments), 2),
             "audio_duration": round(audio_duration, 2),
+            "clip_start": round(clip_start, 2),
+            "clip_length": round(target_duration, 2),
             "bpm": bpm,
             "beats": beats,
             "count": len(fragments),
