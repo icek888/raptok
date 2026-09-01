@@ -1,16 +1,14 @@
-import { Loader2, Activity, Mic, Palette, Gauge, Zap } from 'lucide-react';
+import { Loader2, Activity, Palette, Gauge, Zap } from 'lucide-react';
 import type { BPMResult, TrackAnalysis } from '../types';
 
 interface Props {
   loading: boolean;
   bpmData: BPMResult | null;
   trackAnalysis: TrackAnalysis | null;
-  whisperText: string | null;
-  whisperLoading: boolean;
   audioDuration: number | null;
 }
 
-export function AnalysisPanel({ loading, bpmData, trackAnalysis, whisperText, whisperLoading, audioDuration }: Props) {
+export function AnalysisPanel({ loading, bpmData, trackAnalysis, audioDuration }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -105,23 +103,6 @@ export function AnalysisPanel({ loading, bpmData, trackAnalysis, whisperText, wh
         </div>
       )}
 
-      {/* WhisperX lyrics detection */}
-      <div className="p-5 bg-white/5 rounded-xl">
-        <div className="flex items-center gap-2 mb-3">
-          <Mic size={20} className="text-green-400" />
-          <span className="text-gray-400 text-sm">Auto-detected Lyrics</span>
-          {whisperLoading && <Loader2 size={14} className="animate-spin text-gray-500" />}
-        </div>
-        {whisperText ? (
-          <div className="text-white/70 text-sm whitespace-pre-wrap max-h-40 overflow-y-auto bg-black/20 p-3 rounded-lg">
-            {whisperText}
-          </div>
-        ) : whisperLoading ? (
-          <p className="text-gray-500 text-sm">Transcribing with WhisperX...</p>
-        ) : (
-          <p className="text-gray-500 text-sm">No lyrics detected — you can enter them manually on the next step.</p>
-        )}
-      </div>
     </div>
   );
 }

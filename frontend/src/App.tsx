@@ -9,6 +9,7 @@ import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
 import { CutToolsPanel } from './components/CutToolsPanel';
 import { BeatEffectsPanel } from './components/BeatEffectsPanel';
+import { AIStylePanel } from './components/AIStylePanel';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { defaultStyle, api } from './api/client';
@@ -42,7 +43,6 @@ function App() {
   const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(null);
   const [whisperText, setWhisperText] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [whisperLoading] = useState(false);
 
   // Lyrics (Step 2)
   const [lyrics, setLyrics] = useState('');
@@ -314,8 +314,6 @@ function App() {
               loading={analysisLoading}
               bpmData={bpmData}
               trackAnalysis={trackAnalysis}
-              whisperText={whisperText}
-              whisperLoading={whisperLoading}
               audioDuration={audioDuration}
             />
           )}
@@ -339,6 +337,7 @@ function App() {
                 videoUrl={null}
                 onAudioStartChange={setAudioStart}
                 onRangeChange={handleClipRangeChange}
+                active={step === 2}
                 style={style}
                 onStyleChange={setStyle}
                 templateId={templateId}
@@ -407,7 +406,12 @@ function App() {
                 onTemplateChange={setTemplateId}
               />
             </div>
-            <div className="w-72 flex-shrink-0">
+            <div className="w-72 flex-shrink-0 space-y-4">
+              <AIStylePanel
+                audioPath={audioPath || undefined}
+                onApplyStyle={(s: Partial<SubtitleStyle>) => setStyle(prev => ({ ...prev, ...s }))}
+                onApplyTemplate={(tid: string) => setTemplateId(tid)}
+              />
               <BeatEffectsPanel
                 bpmData={bpmData}
                 beatEffectsEnabled={beatEffectsOn}
