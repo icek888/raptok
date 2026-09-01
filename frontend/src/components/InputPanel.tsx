@@ -1,23 +1,19 @@
-import { useState, useRef } from 'react';
-import { Link2, Upload, FileText, Loader2, AlertCircle, Film, Music } from 'lucide-react';
+import { useState } from 'react';
+import { Link2, Loader2, AlertCircle, Film, Upload } from 'lucide-react';
 import { api } from '../api/client';
 import type { VideoInfo } from '../types';
 
 interface Props {
   onAnalyzed: (info: VideoInfo) => void;
-  onAudioUploaded: (path: string, filename: string) => void;
-  onLyricsChange: (lyrics: string) => void;
   videoInfo: VideoInfo | null;
-  audioName: string | null;
-  lyrics: string;
+  audioDuration: number | null;
 }
 
-export function InputPanel({ onAnalyzed, onAudioUploaded, onLyricsChange, videoInfo, audioName, lyrics }: Props) {
+export function InputPanel({ onAnalyzed, videoInfo, audioDuration }: Props) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [uploadingAudio, setUploadingAudio] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const handleAnalyze = async () => {
     if (!url.trim()) return;
@@ -33,23 +29,33 @@ export function InputPanel({ onAnalyzed, onAudioUploaded, onLyricsChange, videoI
     }
   };
 
-  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingAudio(true);
+    setUploading(true);
     setError(null);
     try {
-      const result = await api.uploadAudio(file);
-      onAudioUploaded(result.path, result.filename);
+      const info = await api.uploadVideo(file);
+      onAnalyzed(info);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to upload audio');
+      setError(e instanceof Error ? e.message : 'Failed to upload video');
     } finally {
-      setUploadingAudio(false);
+      setUploading(false);
     }
   };
 
   return (
     <div className="space-y-5">
+      <div>
+        <h2 className="text-2xl font-bold text-white mb-2">Load Video</h2>
+        <p className="text-gray-400 text-sm mb-4">
+          {audioDuration
+            ? `Pick video for your ${Math.floor(audioDuration / 60)}:${Math.floor(audioDuration % 60).toString().padStart(2, '0')} audio track — fragments will be auto-cut to match.`
+            : 'Paste a video URL or upload a file.'}
+        </p>
+      </div>
+
+      {/* URL input */}
       <div>
         <label className="flex items-center gap-2 text-sm font-medium text-purple-300 mb-2">
           <Link2 size={16} /> Video URL
@@ -72,6 +78,27 @@ export function InputPanel({ onAnalyzed, onAudioUploaded, onLyricsChange, videoI
             {loading ? 'Loading...' : 'Analyze'}
           </button>
         </div>
+      </div>
+
+      {/* Upload */}
+      <div>
+        <label className="flex items-center gap-2 text-sm font-medium text-pink-300 mb-2">
+          <Upload size={16} /> Or upload video file
+        </label>
+        <label
+          className="cursor-pointer border-2 border-dashed border-[#2a2a3a] hover:border-pink-500/50 rounded-lg p-6 transition text-center block"
+        >
+          {uploading ? (
+            <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+              <Loader2 size={16} className="animate-spin" /> Uploading...
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
+              <Upload size={16} /> Click to upload MP4/WebM
+            </div>
+          )}
+          <input type="file" accept="video/*" onChange={handleUpload} className="hidden" disabled={uploading} />
+        </label>
       </div>
 
       {error && (
@@ -106,44 +133,6 @@ export function InputPanel({ onAnalyzed, onAudioUploaded, onLyricsChange, videoI
           </div>
         </div>
       )}
-
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-pink-300 mb-2">
-          <Music size={16} /> Audio Track (MP3)
-        </label>
-        <div
-          onClick={() => fileRef.current?.click()}
-          className="cursor-pointer border-2 border-dashed border-[#2a2a3a] hover:border-pink-500/50 rounded-lg p-4 transition text-center"
-        >
-          {uploadingAudio ? (
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
-              <Loader2 size={16} className="animate-spin" /> Uploading...
-            </div>
-          ) : audioName ? (
-            <div className="flex items-center justify-center gap-2 text-sm text-green-400">
-              <Music size={16} /> {audioName}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-500">
-              <Upload size={16} /> Click to upload MP3
-            </div>
-          )}
-          <input ref={fileRef} type="file" accept=".mp3,audio/*" onChange={handleAudioUpload} className="hidden" />
-        </div>
-      </div>
-
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-purple-300 mb-2">
-          <FileText size={16} /> Lyrics
-        </label>
-        <textarea
-          value={lyrics}
-          onChange={e => onLyricsChange(e.target.value)}
-          placeholder="Paste your song lyrics here..."
-          rows={6}
-          className="w-full bg-[#0f0f17] border border-[#2a2a3a] rounded-lg px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none transition resize-y"
-        />
-      </div>
     </div>
   );
 }

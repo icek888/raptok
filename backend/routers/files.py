@@ -91,3 +91,37 @@ async def audio_from_youtube(url: str = Form(...)):
         duration = 0
 
     return {"path": str(audio_path), "filename": audio_path.name, "size": os.path.getsize(audio_path), "duration": round(duration, 2)}
+
+
+@router.post("/api/upload/video")
+async def upload_video(file: UploadFile = File(...)):
+    """Upload a video file directly (mp4/webm)."""
+    import subprocess
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    job_id = f"video_{os.urandom(6).hex()}"
+    suffix = os.path.splitext(file.filename)[1] or ".mp4"
+    video_path = TEMP_DIR / f"{job_id}{suffix}"
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Probe metadata with ffprobe
+    try:
+        probe = subprocess.run([
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", "-show_streams", str(video_path)
+        ], capture_output=True, text=True, timeout=30)
+        import json
+        meta = json.loads(probe.stdout)
+        vstream = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
+        return {
+            "job_id": job_id,
+            "title": file.filename,
+            "source": "upload",
+            "duration": float(meta.get("format", {}).get("duration", 0)),
+            "width": int(vstream.get("width", 0)),
+            "height": int(vstream.get("height", 0)),
+            "local_path": str(video_path),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to probe video: {e}")

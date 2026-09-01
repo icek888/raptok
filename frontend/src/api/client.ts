@@ -324,6 +324,13 @@ export const api = {
     return postForm('/api/auto-cut-by-audio', form);
   },
 
+  // ── Video upload ──
+  uploadVideo: (file: File): Promise<VideoInfo> => {
+    const form = new FormData();
+    form.append('file', file);
+    return postForm('/api/upload/video', form);
+  },
+
   // ── Projects ──
   listProjects: () => getJSON(`${API_BASE}/projects`),
   createProject: () => postJSON(`${API_BASE}/projects`, {}),

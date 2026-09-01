@@ -120,9 +120,23 @@ function App() {
       form.append('language', 'en');
       fetch('/api/transcribe-full', { method: 'POST', body: form, credentials: 'include' })
         .then(r => r.json())
-        .then(data => {
+        .then(async data => {
           setWhisperText(data.text || '');
-          setWordTimings(data.words || []);
+          const words: WordTiming[] = data.words || [];
+          setWordTimings(words);
+
+          // ── Auto-generate karaoke subtitles from word timings ──
+          // word-split works with absolute timestamps, fragments not required
+          if (words.length > 0) {
+            try {
+              const subResult = await api.wordSplitSubtitles(
+                data.text || '', [], words, 0
+              );
+              setSubtitles(subResult.subtitles);
+            } catch (e) {
+              console.error('Auto subtitle generation failed:', e);
+            }
+          }
         })
         .catch(e => console.error('WhisperX failed:', e))
         .finally(() => setWhisperLoading(false));
@@ -343,11 +357,8 @@ function App() {
           {step === 3 && (
             <InputPanel
               onAnalyzed={handleVideoAnalyzed}
-              onAudioUploaded={() => {}}
-              onLyricsChange={() => {}}
               videoInfo={videoInfo}
-              audioName={null}
-              lyrics=""
+              audioDuration={audioDuration}
             />
           )}
 
