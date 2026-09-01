@@ -1,7 +1,7 @@
 """File serving + upload router."""
 import os
 import shutil
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from config import TEMP_DIR, OUTPUT_DIR
 
@@ -55,4 +55,39 @@ async def upload_audio(file: UploadFile = File(...)):
     audio_path = TEMP_DIR / f"{job_id}_{file.filename}"
     with open(audio_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    return {"path": str(audio_path), "filename": file.filename, "size": os.path.getsize(audio_path)}
+    # Return duration too
+    try:
+        import librosa
+        duration = librosa.get_duration(path=str(audio_path))
+        return {"path": str(audio_path), "filename": file.filename, "size": os.path.getsize(audio_path), "duration": round(duration, 2)}
+    except Exception:
+        return {"path": str(audio_path), "filename": file.filename, "size": os.path.getsize(audio_path)}
+
+
+@router.post("/api/audio-from-youtube")
+async def audio_from_youtube(url: str = Form(...)):
+    """Download audio from YouTube URL and return path + duration."""
+    import subprocess
+    job_id = f"audio_{os.urandom(6).hex()}"
+    audio_path = TEMP_DIR / f"{job_id}.mp3"
+    try:
+        result = subprocess.run([
+            "yt-dlp", "-x", "--audio-format", "mp3",
+            "--no-playlist", "-o", str(audio_path),
+            url
+        ], capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            raise HTTPException(status_code=400, detail=f"yt-dlp failed: {result.stderr[-500:]}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="YouTube download timed out (120s)")
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=500, detail="Audio file not created")
+
+    try:
+        import librosa
+        duration = librosa.get_duration(path=str(audio_path))
+    except Exception:
+        duration = 0
+
+    return {"path": str(audio_path), "filename": audio_path.name, "size": os.path.getsize(audio_path), "duration": round(duration, 2)}

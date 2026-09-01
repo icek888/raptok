@@ -307,6 +307,23 @@ export const api = {
   snapToBeats: (fragments: any[], beats: number[]): Promise<any> =>
     postJSON(`${API_BASE}/features/snap-to-beats`, { fragments, beats }),
 
+  // ── Audio from YouTube ──
+  audioFromYouTube: (url: string) => {
+    const form = new FormData();
+    form.append('url', url);
+    return postForm('/api/audio-from-youtube', form);
+  },
+
+  // ── Auto Cut by Audio ──
+  autoCutByAudio: (audioPath: string, videoDuration: number, minFrag = 3, maxFrag = 6) => {
+    const form = new FormData();
+    form.append('audio_path', audioPath);
+    form.append('video_duration', String(videoDuration));
+    form.append('min_frag', String(minFrag));
+    form.append('max_frag', String(maxFrag));
+    return postForm('/api/auto-cut-by-audio', form);
+  },
+
   // ── Projects ──
   listProjects: () => getJSON(`${API_BASE}/projects`),
   createProject: () => postJSON(`${API_BASE}/projects`, {}),

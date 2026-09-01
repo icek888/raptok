@@ -31,6 +31,8 @@ interface Props {
   onTemplateChange?: (id: string) => void;
   onApplyStyle?: (style: Partial<SubtitleStyle>) => void;
   onApplyTemplate?: (templateId: string) => void;
+  onLyricsChange?: (text: string) => void;
+  autoDetectedText?: string;
 }
 
 export function SubtitleEditor({
@@ -42,6 +44,7 @@ export function SubtitleEditor({
   style, onStyleChange,
   templateId, onTemplateChange,
   onApplyStyle, onApplyTemplate,
+  onLyricsChange: _onLyricsChange, autoDetectedText: _autoDetectedText,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
