@@ -168,10 +168,12 @@ function App() {
     }
   };
 
-  // ── Handlers (kept from v2) ──
+  // ── Handlers ──
+  // NOTE (v3): subtitles are built from WhisperX word timestamps (absolute),
+  // NOT distributed across fragment slots — they survive fragment changes.
+  // Do NOT clear them when fragments change (that was v2 behavior).
   const handleFragmentsChange = (frags: Fragment[]) => {
     setFragments(frags);
-    if (subtitles.length > 0) setSubtitles([]);
   };
 
   const handleApplyStyle = (s: Partial<SubtitleStyle>) => setStyle(prev => ({ ...prev, ...s }));
