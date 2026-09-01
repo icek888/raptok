@@ -93,12 +93,16 @@ function App() {
     setUsername('');
   };
 
-  // ── Step 0: Audio ready → auto-trigger Step 1 analysis ──
+  // ── Step 0: Audio ready → auto-trigger Step 1 analysis + background pre-transcription ──
   const handleAudioReady = (path: string, name: string, duration: number) => {
     setAudioPath(path);
     setAudioName(name);
     setAudioDuration(duration);
     setStep(1); // Auto-advance to Analysis
+
+    // Fire background pre-transcription immediately (stem split + WhisperX large-v3)
+    // By the time user reaches Lyrics step, result is cached and ready
+    api.pretranscribe(path, 'ru', 'large-v3').catch(() => {});
   };
 
   // ── Step 1: Auto-analysis when audio is loaded (BPM + mood only, NO transcription) ──

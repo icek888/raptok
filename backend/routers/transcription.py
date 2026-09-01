@@ -188,3 +188,94 @@ async def api_stem_separate(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Background pre-transcription cache ──
+# In-memory store: audio_path → {status, result, error, started_at}
+_pretranscribe_cache: dict[str, dict] = {}
+_pretranscribe_lock = asyncio.Lock()
+
+
+@router.post("/api/pretranscribe")
+async def api_pretranscribe(
+    audio_path: str = Form(...),
+    language: str = Form("ru"),
+    model_size: str = Form("large-v3"),
+):
+    """Start stem separation + WhisperX in the background.
+    
+    Returns immediately with status='started'. Frontend polls /api/pretranscribe/status.
+    Result is cached in memory — when user reaches Lyrics step, it's already done.
+    """
+    async with _pretranscribe_lock:
+        existing = _pretranscribe_cache.get(audio_path)
+        if existing and existing.get("status") in ("running", "done"):
+            return {"status": existing["status"], "message": "Already running or done"}
+
+        _pretranscribe_cache[audio_path] = {
+            "status": "running",
+            "result": None,
+            "error": None,
+            "started_at": time.time(),
+        }
+
+    # Fire and forget — runs in background
+    asyncio.create_task(_run_pretranscribe(audio_path, language, model_size))
+    return {"status": "started", "message": "Background transcription started"}
+
+
+@router.get("/api/pretranscribe/status")
+async def api_pretranscribe_status(audio_path: str):
+    """Check status of background pre-transcription."""
+    entry = _pretranscribe_cache.get(audio_path)
+    if not entry:
+        return {"status": "not_started"}
+    return {
+        "status": entry["status"],
+        "result": entry["result"],
+        "error": entry["error"],
+        "elapsed": round(time.time() - entry["started_at"], 1) if entry.get("started_at") else 0,
+    }
+
+
+async def _run_pretranscribe(audio_path: str, language: str, model_size: str):
+    """Background task: separate vocals → transcribe → cache result."""
+    try:
+        t0 = time.time()
+        logger.info(f"[pretranscribe] Starting for {audio_path} (model={model_size})")
+
+        # Step 1: Stem separation (cached by stem_separator itself)
+        vocal_path = await separate_vocals(audio_path, method="auto")
+        logger.info(f"[pretranscribe] Vocals separated in {time.time()-t0:.1f}s")
+
+        # Step 2: WhisperX transcription
+        loop = asyncio.get_event_loop()
+        whisper_result = await loop.run_in_executor(
+            None,
+            lambda: transcribe_audio(vocal_path, language=language, word_timestamps=True, model_size=model_size),
+        )
+        whisper_words = whisper_result.get("words", [])
+        logger.info(f"[pretranscribe] WhisperX done in {time.time()-t0:.1f}s, {len(whisper_words)} words")
+
+        result = {
+            "text": whisper_result.get("text", ""),
+            "words": whisper_words,
+            "language": whisper_result.get("language", "unknown"),
+            "method": "whisperx_only",
+        }
+
+        _pretranscribe_cache[audio_path] = {
+            "status": "done",
+            "result": result,
+            "error": None,
+            "started_at": t0,
+        }
+        logger.info(f"[pretranscribe] Complete in {time.time()-t0:.1f}s")
+
+    except Exception as e:
+        logger.error(f"[pretranscribe] Failed: {e}")
+        _pretranscribe_cache[audio_path] = {
+            "status": "error",
+            "result": None,
+            "error": str(e),
+            "started_at": time.time(),
+        }

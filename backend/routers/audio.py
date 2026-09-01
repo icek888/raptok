@@ -169,6 +169,7 @@ async def api_auto_cut_by_audio(
             count = max(3, min(12, int(target_duration / ideal_frag_dur)))
 
         # Use smart_cut to get fragments from energy peaks + beats
+        # Note: smart_cut selects within video_duration (can't pick footage that doesn't exist)
         fragments = smart_cut(
             duration=video_duration,
             beats=beats,
@@ -183,21 +184,39 @@ async def api_auto_cut_by_audio(
         if fragments and beats:
             fragments = snap_to_beats(fragments, beats)
 
-        # Ensure total duration matches target duration (trim or extend last fragment)
+        # ── If video is shorter than clip range → loop fragments to fill target ──
+        # v3: audio defines the clip length, video adapts (loop/repeat footage)
+        if fragments and target_duration > 0:
+            total = sum(f["duration"] for f in fragments)
+            if total < target_duration:
+                # Cycle fragments until we reach target_duration
+                cycled = list(fragments)
+                i = 0
+                while sum(f["duration"] for f in cycled) < target_duration:
+                    src = fragments[i % len(fragments)]
+                    cycled.append({
+                        "id": len(cycled),
+                        "start": src["start"],
+                        "end": src["end"],
+                        "duration": src["duration"],
+                    })
+                    i += 1
+                    if i > 50:  # safety limit
+                        break
+                fragments = cycled
+
+        # Ensure total duration matches target duration (trim last fragment)
         if fragments:
             total = sum(f["duration"] for f in fragments)
             if total > target_duration:
-                # Trim last fragment
                 excess = total - target_duration
                 last = fragments[-1]
                 last["end"] = round(last["end"] - excess, 3)
                 last["duration"] = round(last["duration"] - excess, 3)
-            elif total < target_duration:
-                # Extend last fragment
-                deficit = target_duration - total
-                last = fragments[-1]
-                last["end"] = round(last["end"] + deficit, 3)
-                last["duration"] = round(last["duration"] + deficit, 3)
+
+        # Renumber
+        for i, f in enumerate(fragments):
+            f["id"] = i
 
         return {
             "fragments": fragments,

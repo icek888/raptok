@@ -314,6 +314,19 @@ export const api = {
     return postForm('/api/audio-from-youtube', form);
   },
 
+  // ── Background pre-transcription (fire and forget, poll for result) ──
+  pretranscribe: (audioPath: string, language = 'ru', modelSize = 'large-v3') => {
+    const form = new FormData();
+    form.append('audio_path', audioPath);
+    form.append('language', language);
+    form.append('model_size', modelSize);
+    return postForm('/api/pretranscribe', form);
+  },
+  pretranscribeStatus: (audioPath: string) => {
+    return fetch(`${API_BASE}/pretranscribe/status?audio_path=${encodeURIComponent(audioPath)}`, { credentials: 'include' })
+      .then(r => r.json());
+  },
+
   // ── Auto Cut by Audio ──
   autoCutByAudio: (audioPath: string, videoDuration: number, minFrag = 3, maxFrag = 6, clipStart = 0, clipLength = 0) => {
     const form = new FormData();

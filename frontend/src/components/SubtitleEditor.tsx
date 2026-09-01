@@ -146,24 +146,62 @@ export function SubtitleEditor({
   const handleTranscribe = async () => {
     if (!audioPath) return;
     setTranscribing(true);
-    setTranscribeStatus({ label: 'Starting...', progress: 0 });
+    setTranscribeStatus({ label: 'Checking cache...', progress: 5 });
+
     try {
+      // ── First: check if background pre-transcription already finished ──
+      const cached = await api.pretranscribeStatus(audioPath);
+      if (cached.status === 'done' && cached.result) {
+        setTranscribeStatus({ label: 'Loading cached result ✓', progress: 100 });
+        const result = cached.result;
+        setFullTrackWords(result.words);
+        setHasFullTranscription(true);
+
+        const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
+        onWordTimingsChange(filtered);
+        regenSubtitles(filtered);
+        setShowWordEditor(true);
+        return; // instant!
+      }
+
+      // ── Not cached → check if still running in background ──
+      if (cached.status === 'running') {
+        setTranscribeStatus({ label: 'Background transcription in progress...', progress: 30 });
+        // Poll every 3 seconds until done
+        for (let i = 0; i < 100; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          const poll = await api.pretranscribeStatus(audioPath);
+          if (poll.status === 'done' && poll.result) {
+            setTranscribeStatus({ label: 'Complete ✓', progress: 100 });
+            const result = poll.result;
+            setFullTrackWords(result.words);
+            setHasFullTranscription(true);
+            const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
+            onWordTimingsChange(filtered);
+            regenSubtitles(filtered);
+            setShowWordEditor(true);
+            return;
+          }
+          if (poll.status === 'error') break;
+          setTranscribeStatus({ label: `Background transcription... ${poll.elapsed}s`, progress: 30 + Math.min(60, i * 2) });
+        }
+        // Timeout → fall through to live SSE
+      }
+
+      // ── Fallback: live SSE transcription (model mismatch or no background started) ──
+      setTranscribeStatus({ label: 'Starting live transcription...', progress: 0 });
       const result = await api.transcribeFullStream(
         audioPath, transcribeLang, lyrics, whisperModel,
         (data) => setTranscribeStatus({ label: data.label, progress: data.progress, elapsed: data.elapsed }),
       );
-      
+
       setFullTrackWords(result.words);
       setHasFullTranscription(true);
-      
+
       const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
       onWordTimingsChange(filtered);
-      
-      const subResult = await api.wordSplitSubtitles(
-        lyrics || result.text, fragments, filtered, 0,
-      );
-      onSubtitlesChange(subResult.subtitles);
-      
+      regenSubtitles(filtered);
+
       setShowWordEditor(true);
     } catch (e) {
       console.error('Transcribe failed:', e);
