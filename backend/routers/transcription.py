@@ -3,6 +3,8 @@ import json
 import time
 import asyncio
 import logging
+import os
+import subprocess
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from models.schemas import TranscribeRequest, TranscribeResult
@@ -13,6 +15,8 @@ from services.stem_separator import separate_vocals, separate_vocals_with_stems
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+TEMP_DIR = os.environ.get("TEMP_DIR", "/tmp/raptok")
 
 
 @router.post("/api/transcribe", response_model=TranscribeResult)
@@ -103,35 +107,65 @@ async def api_transcribe_full_stream(
     language: str = Form("en"),
     lyrics: str = Form(""),
     model_size: str = Form(""),
+    clip_start: float = Form(0.0),
+    clip_length: float = Form(0.0),
 ):
-    """Transcribe with SSE progress updates."""
+    """Transcribe with SSE progress updates.
+    
+    v3: If clip_start + clip_length provided, only transcribes that segment
+    (e.g. 37s instead of full 5-min track → 10x faster on CPU).
+    """
     async def generate():
         try:
             t0 = time.time()
             def elapsed():
                 return round(time.time() - t0, 1)
 
-            # Step 1: Stem separation
-            yield f"data: {json.dumps({'step': 'separation', 'label': 'Separating vocals from music...', 'progress': 5, 'elapsed': elapsed()})}\n\n"
+            # ── v3: Cut segment if clip_range provided ──
+            whisper_input = audio_path
+            segment_offset = 0.0  # time offset for word timestamps
+            if clip_length > 0 and clip_start >= 0:
+                yield f"data: {json.dumps({'step': 'cut', 'label': f'Cutting segment ({clip_length:.0f}s)...', 'progress': 3, 'elapsed': elapsed()})}\n\n"
+                seg_path = os.path.join(TEMP_DIR, f"seg_{hash(audio_path)}_{clip_start}_{clip_length}.wav")
+                if not os.path.exists(seg_path):
+                    proc = await asyncio.create_subprocess_exec(
+                        "ffmpeg", "-y", "-ss", str(clip_start), "-t", str(clip_length),
+                        "-i", audio_path, "-ar", "16000", "-ac", "1", seg_path,
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.wait()
+                whisper_input = seg_path
+                segment_offset = clip_start
+                yield f"data: {json.dumps({'step': 'cut', 'label': f'Segment ready ({clip_length:.0f}s) ✓', 'progress': 8, 'elapsed': elapsed()})}\n\n"
+
+            # Step 1: Stem separation (on segment if cut, or full track)
+            yield f"data: {json.dumps({'step': 'separation', 'label': 'Separating vocals from music...', 'progress': 10, 'elapsed': elapsed()})}\n\n"
             try:
-                vocal_path = await separate_vocals(audio_path, method="auto")
+                vocal_path = await separate_vocals(whisper_input, method="auto")
                 whisper_input = vocal_path
-                yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocals isolated ✓', 'progress': 25, 'elapsed': elapsed()})}\n\n"
+                yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocals isolated ✓', 'progress': 30, 'elapsed': elapsed()})}\n\n"
             except Exception as e:
                 logger.warning(f"Stem separation failed ({e})")
-                whisper_input = audio_path
-                yield f"data: {json.dumps({'step': 'separation', 'label': 'Using original audio (separation skipped)', 'progress': 25, 'elapsed': elapsed()})}\n\n"
+                yield f"data: {json.dumps({'step': 'separation', 'label': 'Using original audio (separation skipped)', 'progress': 30, 'elapsed': elapsed()})}\n\n"
 
-            # Step 2: WhisperX transcription
+            # Step 2: WhisperX transcription (on segment)
             model_label = model_size or "small"
-            yield f"data: {json.dumps({'step': 'transcription', 'label': f'WhisperX transcribing ({model_label})...', 'progress': 30, 'elapsed': elapsed()})}\n\n"
+            yield f"data: {json.dumps({'step': 'transcription', 'label': f'WhisperX transcribing ({model_label})...', 'progress': 35, 'elapsed': elapsed()})}\n\n"
             loop = asyncio.get_event_loop()
             whisper_result = await loop.run_in_executor(
                 None,
                 lambda: transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size),
             )
             whisper_words = whisper_result.get("words", [])
-            yield f"data: {json.dumps({'step': 'transcription', 'label': f'Transcribed {len(whisper_words)} words ✓', 'progress': 70, 'elapsed': elapsed()})}\n\n"
+            
+            # ── Shift word timestamps back to absolute (clip_start offset) ──
+            if segment_offset > 0:
+                for w in whisper_words:
+                    if isinstance(w, dict):
+                        w["start"] = round(w.get("start", 0) + segment_offset, 3)
+                        w["end"] = round(w.get("end", 0) + segment_offset, 3)
+            
+            yield f"data: {json.dumps({'step': 'transcription', 'label': f'Transcribed {len(whisper_words)} words ✓', 'progress': 75, 'elapsed': elapsed()})}\n\n"
 
             user_lyrics = lyrics.strip() if lyrics else ""
 

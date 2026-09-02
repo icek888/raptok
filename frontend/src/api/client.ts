@@ -237,6 +237,8 @@ export const api = {
     lyrics?: string,
     modelSize: string = '',
     onProgress?: (data: { step: string; label: string; progress: number; elapsed?: number }) => void,
+    clipStart: number = 0,
+    clipLength: number = 0,
   ): Promise<TranscribeResult & { total_duration?: number; bpm?: number }> => {
     return new Promise((resolve, reject) => {
       const form = new FormData();
@@ -244,6 +246,8 @@ export const api = {
       form.append('language', language);
       if (lyrics) form.append('lyrics', lyrics);
       if (modelSize) form.append('model_size', modelSize);
+      if (clipStart > 0) form.append('clip_start', String(clipStart));
+      if (clipLength > 0) form.append('clip_length', String(clipLength));
 
       // Use fetch with streaming response
       fetch(`${API_BASE}/transcribe-full-stream`, { method: 'POST', body: form, credentials: 'include' })
@@ -316,19 +320,6 @@ export const api = {
     const form = new FormData();
     form.append('url', url);
     return postForm('/api/audio-from-youtube', form);
-  },
-
-  // ── Background pre-transcription (fire and forget, poll for result) ──
-  pretranscribe: (audioPath: string, language = 'ru', modelSize = 'large-v3') => {
-    const form = new FormData();
-    form.append('audio_path', audioPath);
-    form.append('language', language);
-    form.append('model_size', modelSize);
-    return postForm('/api/pretranscribe', form);
-  },
-  pretranscribeStatus: (audioPath: string) => {
-    return fetch(`${API_BASE}/pretranscribe/status?audio_path=${encodeURIComponent(audioPath)}`, { credentials: 'include' })
-      .then(r => r.json());
   },
 
   // ── Auto Cut by Audio ──
