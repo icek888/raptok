@@ -14,11 +14,14 @@ interface CutToolsPanelProps {
   onAutoCut: (fragments: any[]) => void;
   onSnapToBeats: (fragments: any[]) => void;
   fragments: any[];
+  audioPath: string | null;
+  videoDuration: number;
+  clipRange: { start: number; end: number } | null;
 }
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
-export function CutToolsPanel({ bpmData, trackAnalysis, onAutoCut, onSnapToBeats, fragments }: CutToolsPanelProps) {
+export function CutToolsPanel({ bpmData, trackAnalysis: _trackAnalysis, onAutoCut, onSnapToBeats, fragments, audioPath, videoDuration, clipRange }: CutToolsPanelProps) {
   const [autoCutStatus, setAutoCutStatus] = useState<Status>('idle');
   const [snapStatus, setSnapStatus] = useState<Status>('idle');
   const [count, setCount] = useState(7);
@@ -27,21 +30,24 @@ export function CutToolsPanel({ bpmData, trackAnalysis, onAutoCut, onSnapToBeats
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
-    setEnabled(!!bpmData?.beats?.length && !!trackAnalysis?.duration);
-  }, [bpmData, trackAnalysis]);
+    setEnabled(!!bpmData?.beats?.length && !!audioPath);
+  }, [bpmData, audioPath]);
 
   const handleAutoCut = async () => {
-    if (!bpmData?.beats?.length || !trackAnalysis?.duration) return;
+    if (!bpmData?.beats?.length) return;
     setAutoCutStatus('loading');
     try {
-      const result = await api.autoCut(
-        trackAnalysis.duration,
-        bpmData.beats,
-        trackAnalysis.energy_curve,
-        trackAnalysis.energy_times,
-        count,
+      // ── v3: use autoCutByAudio with clipRange — audio defines clip length ──
+      const clipStart = clipRange?.start ?? 0;
+      const clipLength = clipRange ? clipRange.end - clipRange.start : 0;
+      
+      const result = await api.autoCutByAudio(
+        audioPath || '',
+        videoDuration,
         minFrag,
-        maxFrag
+        maxFrag,
+        clipStart,
+        clipLength,
       );
       onAutoCut(result.fragments);
       setAutoCutStatus('done');

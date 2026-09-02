@@ -134,42 +134,18 @@ function App() {
     }
   };
 
-  // ── Step 2: Lyrics range selected → this defines the clip length ──
+  // ── Step 2: Lyrics range selected → this defines the clip length (SOURCE OF TRUTH) ──
   const handleClipRangeChange = (start: number, end: number) => {
     setClipRange({ start, end });
-    // If video is already loaded, re-run auto-cut with the new range length
-    if (videoInfo && audioPath && end > start) {
-      const clipLength = end - start;
-      api.autoCutByAudio(audioPath, videoInfo.duration, 3, 6, start, clipLength)
-        .then((data: any) => {
-          if (data.fragments?.length) {
-            setFragments(data.fragments.map((f: any, i: number) => ({
-              id: i, start: f.start, end: f.end, duration: f.duration
-            })));
-          }
-        })
-        .catch(e => console.error('Auto-cut failed:', e));
-    }
+    // v3: clip range is the single source of truth — stored here, used on step 4 Auto Cut.
+    // No auto-cut here; user triggers it on Fragments step via CutToolsPanel.
   };
 
   // ── Step 3: Video analyzed ──
   const handleVideoAnalyzed = (info: VideoInfo) => {
     setVideoInfo(info);
-    // Auto-cut: fragment total duration = selected clip range (not whole track)
-    if (audioPath) {
-      const clipLength = clipRange ? clipRange.end - clipRange.start : null;
-      if (clipLength && clipLength > 0) {
-        api.autoCutByAudio(audioPath, info.duration, 3, 6, clipRange!.start, clipLength)
-          .then((data: any) => {
-            if (data.fragments?.length) {
-              setFragments(data.fragments.map((f: any, i: number) => ({
-                id: i, start: f.start, end: f.end, duration: f.duration
-              })));
-            }
-          })
-          .catch(e => console.error('Auto-cut failed:', e));
-      }
-    }
+    // v3: Auto-cut runs on step 4 via CutToolsPanel button, not here.
+    // Video load just stores videoInfo — clip range (from Lyrics) drives fragment count/duration.
   };
 
   // ── Handlers ──
@@ -384,6 +360,9 @@ function App() {
                   onAutoCut={handleAutoCut}
                   onSnapToBeats={handleSnapToBeats}
                   fragments={fragments}
+                  audioPath={audioPath}
+                  videoDuration={videoInfo?.duration || 0}
+                  clipRange={clipRange}
                 />
               </div>
             </div>
