@@ -256,6 +256,8 @@ class BeatSyncRequest(BaseModel):
     beat_division: str = Field(default="1/4", description="1/1, 1/2, 1/4, 1/8, 1/16")
     min_frag: float = Field(default=2.0, ge=0.5, le=10.0)
     max_frag: float = Field(default=5.0, ge=1.0, le=15.0)
+    clip_start: float = Field(default=0.0)
+    clip_length: float = Field(default=0.0)
 
 
 class BeatSyncResult(BaseModel):

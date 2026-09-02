@@ -76,16 +76,42 @@ async def api_track_analysis(req: BPMRequest):
 
 @router.post("/api/beat-sync", response_model=BeatSyncResult)
 async def api_beat_sync(req: BeatSyncRequest):
-    """Select fragments aligned to musical beats."""
+    """Select fragments aligned to musical beats, scattered across video.
+    
+    v3: clip_start/clip_length define the target duration (from Lyrics step).
+    Fragments are picked from SCATTERED beat positions across the video, not sequential.
+    """
     try:
         bpm_data = detect_bpm(req.audio_path)
-        beats = bpm_data["beats"]
+        all_beats = bpm_data["beats"]
+        bpm = bpm_data["bpm"]
+        
+        # v3: target duration = clip_length if provided, else video duration
+        target_duration = req.clip_length if req.clip_length > 0 else req.duration
+        
+        # Filter beats to clip range + shift to 0-based
+        if req.clip_start > 0 and req.clip_length > 0:
+            clip_end = req.clip_start + req.clip_length
+            beats = [b for b in all_beats if req.clip_start <= b <= clip_end]
+            beats = [round(b - req.clip_start, 3) for b in beats]
+        else:
+            beats = all_beats
+        
+        # ── Get SCATTERED beat positions across video duration ──
+        # Instead of sequential from start, pick evenly spaced across the whole video
         starts = get_beat_aligned_starts(
             beats=beats,
-            duration=req.duration,
+            duration=req.duration,  # video duration (fragments come from video)
             fragment_count=req.count,
             beat_division=req.beat_division,
         )
+        
+        # ── Scatter: pick starts spread across the video, not from the beginning ──
+        if len(starts) > req.count:
+            # Pick evenly spaced starts across the full video
+            step = len(starts) // req.count
+            scattered = [starts[i * step] for i in range(req.count)]
+            starts = scattered
 
         fragments = []
         for i, start in enumerate(starts[:req.count]):
@@ -96,6 +122,12 @@ async def api_beat_sync(req: BeatSyncRequest):
             actual_dur = end - start
             if actual_dur < req.min_frag:
                 continue
+            # Clamp to video duration
+            if end > req.duration:
+                end = req.duration
+                actual_dur = end - start
+                if actual_dur < req.min_frag:
+                    continue
             fragments.append(Fragment(
                 id=len(fragments),
                 start=round(start, 3),
@@ -103,8 +135,40 @@ async def api_beat_sync(req: BeatSyncRequest):
                 duration=round(actual_dur, 3),
             ))
 
+        # ── Loop fragments if total < target_duration (video shorter than clip) ──
+        if fragments and target_duration > 0:
+            total = sum(f.duration for f in fragments)
+            if total < target_duration:
+                cycled = list(fragments)
+                i = 0
+                while sum(f.duration for f in cycled) < target_duration:
+                    src = fragments[i % len(fragments)]
+                    cycled.append(Fragment(
+                        id=len(cycled),
+                        start=src.start,
+                        end=src.end,
+                        duration=src.duration,
+                    ))
+                    i += 1
+                    if i > 50:
+                        break
+                fragments = cycled
+
+        # Trim to target
+        if fragments:
+            total = sum(f.duration for f in fragments)
+            if total > target_duration:
+                excess = total - target_duration
+                last = fragments[-1]
+                last.end = round(last.end - excess, 3)
+                last.duration = round(last.duration - excess, 3)
+
+        # Renumber
+        for i, f in enumerate(fragments):
+            f.id = i
+
         return BeatSyncResult(
-            bpm=bpm_data["bpm"],
+            bpm=bpm,
             beats=beats,
             fragments=fragments,
             total_duration=round(sum(f.duration for f in fragments), 2),

@@ -351,6 +351,7 @@ function App() {
                   onBeatDivisionChange={setBeatDivision}
                   onBpmDetected={setBpmData}
                   bpmData={bpmData}
+                  clipRange={clipRange}
                 />
               </div>
               <div className="w-72 flex-shrink-0">

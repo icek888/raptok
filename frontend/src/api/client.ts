@@ -193,6 +193,8 @@ export const api = {
     beatDivision: string = '1/4',
     minFrag: number = 2,
     maxFrag: number = 5,
+    clipStart: number = 0,
+    clipLength: number = 0,
   ): Promise<BeatSyncResult> =>
     postJSON(`${API_BASE}/beat-sync`, {
       audio_path: audioPath,
@@ -201,6 +203,8 @@ export const api = {
       beat_division: beatDivision,
       min_frag: minFrag,
       max_frag: maxFrag,
+      clip_start: clipStart,
+      clip_length: clipLength,
     }),
 
   // ─── Audio Info (duration, waveform, BPM) ───

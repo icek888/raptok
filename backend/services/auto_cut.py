@@ -92,19 +92,19 @@ def smart_cut(
 ) -> list[dict]:
     """
     Smart cut: select fragments at energy peaks, snapped to beats.
-
-    Instead of random selection, picks moments with highest energy
-    and snaps their boundaries to beats.
+    
+    Fragments are SCATTERED across the video — picks the most energetic moments,
+    not sequential from the start. This makes the final clip dynamic.
     """
     flags = get_flags()
     if not flags.auto_cut_enabled or not beats:
         return []
 
-    # If we have energy data, find peak moments
+    # ── Step 1: Find candidate start times from energy peaks ──
     peak_times = []
     if energy_curve and energy_times and len(energy_curve) > 10:
         avg = sum(energy_curve) / len(energy_curve)
-        # Find peaks above average (lowered threshold from 1.3 to 1.1 for more peaks)
+        # Find peaks above average
         for i in range(2, len(energy_curve) - 2):
             if (energy_curve[i] > avg * 1.1
                 and energy_curve[i] >= energy_curve[i-1]
@@ -116,29 +116,37 @@ def smart_cut(
         peak_times = []
         avg = sum(energy_curve) / len(energy_curve)
         for i in range(1, len(energy_curve) - 1):
-            if energy_curve[i] > avg:  # any above-average moment
+            if energy_curve[i] > avg:
                 peak_times.append(energy_times[i])
 
-    # If still not enough, use evenly spaced beats (but prefer energy peaks)
+    # ── If still not enough peaks → pick SCATTERED beats (not sequential) ──
     if len(peak_times) < count:
-        # Pick evenly spaced beats
+        # Pick evenly spaced beats across the WHOLE video duration
+        # This ensures fragments come from different parts of the video
         step = max(1, len(beats) // count)
         peak_times = [beats[i] for i in range(0, len(beats), step)][:count]
 
-    # Create fragments around each peak, snapped to beats
+    # ── Step 2: Sort peaks by ENERGY (highest first) to prioritize best moments ──
+    # Map peaks to their energy values for sorting
+    if energy_curve and energy_times and len(peak_times) > count:
+        peak_energy = []
+        for pt in peak_times:
+            # Find closest energy sample
+            best_idx = min(range(len(energy_times)), key=lambda i: abs(energy_times[i] - pt))
+            peak_energy.append((pt, energy_curve[best_idx]))
+        # Sort by energy descending, take top `count`
+        peak_energy.sort(key=lambda x: x[1], reverse=True)
+        peak_times = [pt for pt, _ in peak_energy[:count]]
+
+    # ── Step 3: Create fragments around each peak, snapped to beats ──
     fragments = []
     for i, peak in enumerate(peak_times[:count]):
-        # Fragment duration: random within range, but prefer 4 beats
         frag_dur = min(max_frag, max(min_frag, 4.0))
-
-        # Find nearest beat before peak for start
         start = _find_nearest_beat_before(peak, beats)
-        # Find nearest beat after start+duration for end
         end = _find_nearest_beat_after(start + frag_dur, beats)
 
         actual_dur = end - start
         if actual_dur < min_frag:
-            # Extend to minimum
             end = start + min_frag
             actual_dur = min_frag
         if actual_dur > max_frag:

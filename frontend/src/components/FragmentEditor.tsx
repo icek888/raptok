@@ -12,6 +12,7 @@ interface Props {
   onBeatDivisionChange: (div: string) => void;
   onBpmDetected: (bpm: BPMResult) => void;
   bpmData: BPMResult | null;
+  clipRange: { start: number; end: number } | null;
 }
 
 const BEAT_DIVISIONS = [
@@ -25,7 +26,7 @@ const BEAT_DIVISIONS = [
 export function FragmentEditor({
   videoInfo, fragments, onFragmentsChange,
   audioPath, beatDivision, onBeatDivisionChange,
-  onBpmDetected, bpmData,
+  onBpmDetected, bpmData, clipRange,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [rerolling, setRerolling] = useState(false);
@@ -54,7 +55,9 @@ export function FragmentEditor({
     if (!audioPath) return;
     setBeatSyncing(true);
     try {
-      const result = await api.beatSync(audioPath, videoInfo.duration, 7, beatDivision, 2, 5);
+      const clipStart = clipRange?.start ?? 0;
+      const clipLength = clipRange ? clipRange.end - clipRange.start : 0;
+      const result = await api.beatSync(audioPath, videoInfo.duration, 7, beatDivision, 2, 5, clipStart, clipLength);
       onBpmDetected({ bpm: result.bpm, beats: result.beats, downbeats: [], duration: result.total_duration });
       onFragmentsChange(result.fragments);
       await fetchThumbnails(result.fragments);
