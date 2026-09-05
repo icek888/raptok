@@ -497,7 +497,7 @@ function App() {
                   videoInfo={videoInfo}
                   fragments={fragments}
                   onFragmentsChange={handleFragmentsChange}
-                  audioPath={audioPath}
+                  audioPath={segmentPath || audioPath}
                   beatDivision={beatDivision}
                   onBeatDivisionChange={setBeatDivision}
                   onBpmDetected={setBpmData}
@@ -512,7 +512,7 @@ function App() {
                   onAutoCut={handleAutoCut}
                   onSnapToBeats={handleSnapToBeats}
                   fragments={fragments}
-                  audioPath={audioPath}
+                  audioPath={segmentPath || audioPath}
                   videoDuration={videoInfo?.duration || 0}
                   clipRange={clipRange}
                 />
@@ -527,7 +527,7 @@ function App() {
                 videoInfo={videoInfo}
                 videoUrl={videoInfo?.local_path || null}
                 fragments={fragments}
-                audioPath={audioPath}
+                audioPath={segmentPath || audioPath}
                 audioStart={audioStart}
                 subtitles={subtitles}
                 wordTimings={wordTimings}
@@ -543,7 +543,7 @@ function App() {
             </div>
             <div className="w-72 flex-shrink-0 space-y-4">
               <AIStylePanel
-                audioPath={audioPath || undefined}
+                audioPath={segmentPath || audioPath || undefined}
                 onApplyStyle={(s: Partial<SubtitleStyle>) => setStyle(prev => ({ ...prev, ...s }))}
                 onApplyTemplate={(tid: string) => setTemplateId(tid)}
               />
@@ -564,7 +564,7 @@ function App() {
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
-              audioPath={audioPath}
+              audioPath={segmentPath || audioPath}
               audioStart={audioStart}
               subtitles={subtitles}
               wordTimings={wordTimings}
