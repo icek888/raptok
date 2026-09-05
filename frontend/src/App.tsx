@@ -223,6 +223,26 @@ function App() {
     }
   };
 
+  // ── Change Audio: full reset back to upload UI ──
+  const handleResetAudio = () => {
+    setAudioPath(null);
+    setAudioName(null);
+    setAudioDuration(null);
+    setSegmentPath(null);
+    setClipRange(null);
+    setBpmData(null);
+    setTrackAnalysis(null);
+    setLyrics('');
+    setSubtitles([]);
+    setWordTimings([]);
+    setFragments([]);
+    setVideoInfo(null);
+    setAudioStart(0);
+    analysisStarted.current = false;
+    setCurrentProjectId(null); // next upload creates a fresh project
+    setStep(0);
+  };
+
   const handleAudioReady = async (path: string, name: string, duration: number) => {
     // FULL RESET for the new track — no stale state from previous project
     setAudioPath(path);
@@ -442,6 +462,7 @@ function App() {
               onAudioReady={handleAudioReady}
               audioName={audioName}
               audioDuration={audioDuration}
+              onResetAudio={handleResetAudio}
             />
           )}
 

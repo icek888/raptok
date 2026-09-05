@@ -5,9 +5,10 @@ interface Props {
   onAudioReady: (path: string, name: string, duration: number) => void;
   audioName: string | null;
   audioDuration: number | null;
+  onResetAudio?: () => void;
 }
 
-export function AudioInput({ onAudioReady, audioName, audioDuration }: Props) {
+export function AudioInput({ onAudioReady, audioName, audioDuration, onResetAudio }: Props) {
   const [mode, setMode] = useState<'upload' | 'url'>('upload');
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -78,7 +79,7 @@ export function AudioInput({ onAudioReady, audioName, audioDuration }: Props) {
             </div>
           </div>
           <button
-            onClick={() => { setUrl(''); }}
+            onClick={() => { onResetAudio?.(); setUrl(''); }}
             className="px-4 py-2 text-sm text-gray-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition"
           >
             Change
