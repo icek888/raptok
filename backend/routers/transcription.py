@@ -208,6 +208,31 @@ async def api_transcribe_full_stream(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.post("/api/align-lyrics")
+async def api_align_lyrics(
+    lyrics: str = Form(...),
+    whisper_words: str = Form("[]"),  # JSON array of {word, start, end}
+):
+    """Re-align user lyrics onto existing whisper word timings.
+    No re-transcription needed — instant DTW alignment.
+    Use this when user edits lyrics AFTER transcription.
+    """
+    try:
+        words = json.loads(whisper_words) if whisper_words else []
+        if not words:
+            raise HTTPException(status_code=400, detail="No whisper words provided")
+        word_timings = align_lyrics_to_timings(lyrics, words)
+        return {
+            "words": [w.model_dump() if hasattr(w, 'model_dump') else w for w in word_timings],
+            "aligned_words": len(word_timings),
+            "whisper_words": len(words),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/api/stem-separate")
 async def api_stem_separate(
     audio_path: str = Form(...),

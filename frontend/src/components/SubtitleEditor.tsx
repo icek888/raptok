@@ -77,7 +77,7 @@ export function SubtitleEditor({
   
   // ── Full-track word timings (absolute timestamps from whisper) ──
   // Once transcribed, we filter these by audioStart/audioEnd locally
-  const [, setFullTrackWords] = useState<WordTiming[]>([]);
+  const [fullTrackWords, setFullTrackWords] = useState<WordTiming[]>([]);
   const [hasFullTranscription, setHasFullTranscription] = useState(false);
 
   // ── Audio URL for preview ──
@@ -290,6 +290,24 @@ export function SubtitleEditor({
     onSubtitlesChange(lines);
   };
 
+  // ── Apply Lyrics: re-align user lyrics onto existing whisper words ──
+  const [aligning, setAligning] = useState(false);
+  const handleApplyLyrics = async () => {
+    if (!lyrics.trim() || fullTrackWords.length === 0) return;
+    setAligning(true);
+    try {
+      const res = await api.alignLyrics(lyrics, fullTrackWords);
+      onWordTimingsChange(res.words);
+      regenSubtitles(res.words);
+      setShowWordEditor(true);
+    } catch (e) {
+      console.error('Align lyrics failed:', e);
+      alert('Alignment failed. Try re-transcribing with the lyrics pasted first.');
+    } finally {
+      setAligning(false);
+    }
+  };
+
   const insertWord = (idx: number, after = false) => {
     const insertIdx = after ? idx + 1 : idx;
     const prevEnd = insertIdx > 0 ? wordTimings[insertIdx - 1].end : 0;
@@ -400,9 +418,21 @@ export function SubtitleEditor({
         <div className="bg-white/5 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-400">📝 Lyrics (optional — improves alignment accuracy)</span>
-            {lyrics.trim() && (
-              <span className="text-[10px] text-green-400">✓ {lyrics.trim().split(/\s+/).length} words</span>
-            )}
+            <div className="flex items-center gap-2">
+              {lyrics.trim() && (
+                <span className="text-[10px] text-green-400">✓ {lyrics.trim().split(/\s+/).length} words</span>
+              )}
+              {hasFullTranscription && lyrics.trim() && (
+                <button
+                  onClick={handleApplyLyrics}
+                  disabled={aligning}
+                  className="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 rounded text-[10px] font-medium flex items-center gap-1 transition disabled:opacity-40"
+                >
+                  {aligning ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                  {aligning ? 'Aligning...' : 'Apply Lyrics'}
+                </button>
+              )}
+            </div>
           </div>
           <textarea
             value={lyrics}

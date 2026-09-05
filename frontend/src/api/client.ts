@@ -239,6 +239,17 @@ export const api = {
     return postForm(`${API_BASE}/transcribe-full`, form);
   },
 
+  // Re-align user lyrics onto existing whisper words (no re-transcription)
+  alignLyrics: (lyrics: string, whisperWords: { word: string; start: number; end: number }[]): Promise<{ words: WordTiming[]; aligned_words: number; whisper_words: number }> => {
+    const form = new FormData();
+    form.append('lyrics', lyrics);
+    form.append('whisper_words', JSON.stringify(whisperWords));
+    return fetch(`${API_BASE}/align-lyrics`, { method: 'POST', body: form, credentials: 'include' }).then(r => {
+      if (!r.ok) throw new Error(`align-lyrics failed: ${r.status}`);
+      return r.json();
+    });
+  },
+
   // SSE streaming transcription with progress updates
   transcribeFullStream: (
     audioPath: string,
