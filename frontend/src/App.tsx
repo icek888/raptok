@@ -112,6 +112,7 @@ function App() {
   // Project persistence
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [cutting, setCutting] = useState(false);
 
   // ── Persist to localStorage on every state change ──
   useEffect(() => {
@@ -265,15 +266,7 @@ function App() {
   // ── Step 2: Lyrics range selected → this defines the clip length (SOURCE OF TRUTH) ──
   const handleClipRangeChange = (start: number, end: number) => {
     setClipRange({ start, end });
-    // v3: Cut the segment immediately — Lyrics works only with this segment
-    if (audioPath && end > start) {
-      api.cutSegment(audioPath, start, end - start)
-        .then(res => {
-          setSegmentPath(res.segment_path);
-          console.log('Segment cut:', res.segment_path, res.duration + 's');
-        })
-        .catch(e => console.error('Cut segment failed:', e));
-    }
+    // Segment cut happens on Next click, not during dragging
   };
 
   // ── Step 3: Video analyzed ──
@@ -584,11 +577,30 @@ function App() {
               ← Back
             </button>
             <button
-              onClick={() => canProceed(step) && setStep(Math.min(6, step + 1) as Step)}
-              disabled={!canProceed(step)}
+              onClick={async () => {
+                if (!canProceed(step)) return;
+                if (step === 1 && clipRange && audioPath) {
+                  setCutting(true);
+                  try {
+                    const res = await api.cutSegment(audioPath, clipRange.start, clipRange.end - clipRange.start);
+                    setSegmentPath(res.segment_path);
+                    console.log('Segment cut:', res.segment_path, res.duration + 's');
+                    setStep(Math.min(6, step + 1) as Step);
+                  } catch (e) {
+                    console.error('Cut segment failed:', e);
+                    alert('Failed to cut segment. Using full track.');
+                    setStep(Math.min(6, step + 1) as Step);
+                  } finally {
+                    setCutting(false);
+                  }
+                } else {
+                  setStep(Math.min(6, step + 1) as Step);
+                }
+              }}
+              disabled={!canProceed(step) || cutting}
               className="px-6 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition disabled:opacity-30"
             >
-              Next →
+              {cutting ? '⏳ Cutting...' : 'Next →'}
             </button>
           </div>
         )}
