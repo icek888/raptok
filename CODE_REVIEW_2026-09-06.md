@@ -384,9 +384,258 @@ Deps включают `rangeStart/rangeEnd`, но листенеры их не �
 - Дисковая разведка: du/ls по tmp/ и output/
 - Docker: compose без секретов/лимитов/healthcheck — проверено
 - Git: .gitignore не защищает SECRET_KEY fallback (он в коде auth.py)
+- Delegation-агент #3 (services-слой, 399s, 15 вызовов) завершился успешно —
+  его находки в Приложении B ниже
 - Два delegation-агента (бек/фронт deep-dive) упали по 600s таймауту — их скоуп
-  покрыт ручным проходом; services-слой (video_renderer, forced_alignment,
-  дубликация emotion/genre/ai_style) — отдельный отчёт в работе
+  покрыт ручным проходом
 
 *Отчёт сгенерирован автономным ревью Hermes Agent. Все live-эксплойты выполнены
 только на собственном продакшн-сервере проекта, с аккаунтов владельца.*
+
+---
+---
+
+# Приложение B: Services-слой — глубокий ревью (delegation-агент)
+
+**Метод:** read-only проход 9 целевых файлов services/ + beat_effects.py + Form-валидация
+routers (audio, video, transcription). Без live-тестов.
+**Итог:** 2 critical, 8 high, 13 medium, 9 low + dead-code дубликация.
+
+## CRITICAL
+
+**S-C1. `services/ai_style.py:191` — `os.chdir(m2e_path)` мутирует CWD всего процесса**
+Вызывается при ленивой загрузке Music2Emo и навсегда меняет рабочую директорию на
+site-packages. Все последующие относительные пути (ffmpeg concat-списки, временные
+файлы, upload'ы) ломаются непредсказуемо и незаметно.
+**Фикс:** убрать `os.chdir` вообще; при необходимости — патчить `sys.path` и передавать
+рабочую директорию в модель, либо `contextlib.chdir` локально в `try/finally`.
+
+**S-C2. `services/stem_separator.py:43` + `routers/audio.py:28` — кэш вокала по хэшу
+пути даёт вокал ДРУГОГО трека**
+Кэш ключуется `md5(audio_path)`, а сегменты именуются детерминированно
+(`{base}_segment_{start}_{len}.wav`). Перезалив/замена песни → тот же путь →
+`separate_vocals` возвращает закэшированный вокал предыдущего трека → whisper
+транскрибирует чужой аудио → мусорная транскрипция и рендер.
+**Фикс:** ключ кэша = path + mtime + size (или хэш первых N байт контента);
+инвалиировать при несовпадении.
+
+## HIGH
+
+**S-H1. `video_renderer.py:79, 98, 214` — нет try/finally: утечка work_dir при любой
+ошибке + необработанный `TimeoutExpired`**
+Исключение на любом шаге (fragment fail, concat fail, timeout) → `shutil.rmtree`
+не выполняется → `TEMP_DIR/render_*` с частичными фрагментами копится на диске.
+Плюс `subprocess.run(timeout=300)` кидает сырой `TimeoutExpired` — рендер 1080×1920
+с gblur+subtitles на CPU легко превышает 300с → частый отказ с необработанным
+исключением.
+**Фикс:** обернуть Steps 2–4 в `try/finally: shutil.rmtree(work_dir,
+ignore_errors=True)`; ловить `TimeoutExpired` → `RuntimeError`; поднять timeout
+финального рендера (или стримить вывод без capture_output и убрать таймаут в
+пользу progress-мониторинга).
+
+**S-H2. `video_renderer.py:63–87` — нет валидации fragments: пустой список /
+duration<=0 → невнятные падения**
+`fragments=[]` → пустой concat_list → ffmpeg concat падает с cryptic ошибкой;
+`duration=0` → `-t 0` → ошибка посреди цикла (плюс утечка из S-H1).
+**Фикс:** upfront-валидация: `fragments` непуст, `frag.start >= 0`,
+`frag.duration > 0`, суммарная длительность > 0.
+
+**S-H3. `forced_alignment.py:123–143` — DTW backtrack не соответствует
+forward-recurrence**
+Forward: `cost[i][j] = match_cost + min(up, left, diag)` — `match_cost` прибавляется
+ко ВСЕМ трём переходам (включая скипы). Backtrack же предполагает модель
+«скип = +1» (`cost[i-1][j] + 1 == cost[i][j]`). Путь восстановления ≠ оптимальный
+путь DP → тайминги слов привязываются к неправильным whisper-словам.
+**Фикс:** корректный edit-distance DTW (match_cost только на диагонали, skip cost 1)
+либо хранить матрицу шагов при forward и восстанавливать по ней.
+
+**S-H4. `forced_alignment.py:134–143, 78` — DTW молча теряет слова лирики**
+Скипнутые user-слова вообще не попадают в результат; порог приёма — всего 30% слов
+(`len(aligned) >= len(user_words) * 0.3`). Итог: до 70% лирики может бесследно
+исчезнуть из субтитров.
+**Фикс:** для скипнутых user-слов интерполировать тайминг между соседними
+спаренными; поднять порог покрытия.
+
+**S-H5. `video_renderer.py:56 + 220` — ASS-файл утекает в TEMP_DIR при каждом рендере**
+`generate_ass` пишет в `TEMP_DIR/{job_id}.ass` (сиблинг work_dir), `rmtree(work_dir)`
+его не удаляет → один .ass на каждый рендер навсегда.
+**Фикс:** писать .ass внутрь `work_dir`, либо `os.unlink(ass_path)` в finally.
+
+**S-H6. `database.py` (все функции, напр. 141–149, 283–290) — утечки коннектов +
+отсутствие busy_timeout**
+Каждая функция `conn = _get_db()` … `conn.close()` без try/finally: любое исключение
+в `execute` (locked, malformed JSON) → коннект утекает. Нет `PRAGMA busy_timeout` →
+при конкурентных запросах мгновенный `SQLITE_BUSY`. WAL не спасает от write-write
+конфликтов.
+**Фикс:** `contextlib.closing(_get_db())` / try-finally везде;
+`PRAGMA busy_timeout=5000` в `_get_db`.
+
+**S-H7. `bpm_detector.py:23–43` — тишина → BPM = NaN → невалидный JSON ответа**
+`beat_track` на тишине/очень коротком клипе возвращает NaN tempo. Все сравнения с NaN
+False → nan проходит насквозь; `json.dumps` с allow_nan выпускает токен `NaN` →
+клиентский `JSON.parse` падает.
+**Фикс:** `if math.isnan(tempo_val) or tempo_val <= 0: return {"bpm": 0, "beats": [],
+...}`.
+
+**S-H8. `routers/audio.py:16–18, 28–30` — Form-поля без ограничений + «зашитый» битый
+кэш сегмента**
+`clip_start`/`clip_length` без `ge=0`: отрицательный `-ss` → ffmpeg сик с конца
+(неверный кат); `clip_length<=0` → пустой/битый файл, который **навсегда
+закэширован** (`if not os.path.exists(seg_path)` пропускает перегенерацию), а
+`duration` в ответе ложно равна запрошенному clip_length.
+**Фикс:** `Form(..., ge=0)` + `clip_length: Form(..., gt=0)`; перед кэшированием
+проверять размер>0 и фактическую длительность через ffprobe.
+
+## MEDIUM (services)
+
+**S-M1. `subtitle_generator.py:404–441` — режим `line_highlight` фактически показывает
+одно слово за раз**
+Комментарий обещает «full line visible», но код эмитит отдельный Dialogue на каждое
+слово с текстом только этого слова → визуально идентично `word_by_word`.
+Функциональное несоответствие названию/спеке.
+**Фикс:** один Dialogue на строку с inline-переопределением цвета активного слова,
+либо честно переименовать режим.
+
+**S-M2. `subtitle_generator.py:349–354` — `_format_time` падает на отрицательных
+секундах**
+`int(seconds // 3600)` для отрицательных → `-1:...` невалидный ASS; возможные
+инверсии start>end приводят к тихому дропу строк libass.
+**Фикс:** clamp `max(0, seconds)` и guard `end <= start` → пропуск/сваp.
+
+**S-M3. `forced_alignment.py:288–317` — `_bpm_aware_distribute`: start не зажат в
+fragment_duration**
+При медленном BPM и малом числе слов `w_start = i * word_dur` может превысить
+длительность → start > end → слово исчезает из ASS.
+**Фикс:** `w_start = min(w_start, max(0, fragment_duration - 0.1))`,
+`w_end = max(w_end, w_start + 0.05)`.
+
+**S-M4. `subtitle_generator.py:397, 425, 437` — сломанный `\fade`: 7 аргументов
+вместо 6**
+`\fade(255,255,0,0,{ms},0,0)` — libass ожидает 6 (`a1,a2,a3,t1,t2,t3`); тег невалиден
+и молча игнорируется → `fade_in` не работает ни в одном шаблоне.
+**Фикс:** `\fad(0,{ms})` или корректный 6-аргументный `\fade`.
+
+**S-M5. `stem_separator.py:167–176, 217–222` — нет таймаута на ffmpeg-сабпроцессы +
+игнор returncode**
+`await proc.communicate()` без таймаута → зависший ffmpeg вешает endpoint навсегда;
+в `separate_vocals_with_stems` returncode instrumental не проверяется → возвращается
+несуществующий путь.
+**Фикс:** `asyncio.wait_for(proc.communicate(), 120)` + kill; проверять returncode
+и os.path.exists.
+
+**S-M6. `video_renderer.py:152, 168, 183` — `subtitles={ass_path}` без экранирования
+в filter_complex**
+TEMP_DIR конфигурируется env-переменной; пробел/`:`/`,` в пути ломают парсинг фильтра.
+**Фикс:** `subtitles='{path}'` с экранированием или передавать через `chdir` +
+относительное имя.
+
+**S-M7. `downloader.py:72, 159, 196` — таймауты кидают сырой TimeoutExpired,
+частичные загрузки не чистятся; формат может не совпасть с .mp4**
+`best[ext=mp4]/best` при fallback может дать webm в файл с именем .mp4; при таймауте
+yt-dlp partial-файл остаётся.
+**Фикс:** try/except + cleanup; `--merge-output-format mp4` / `-o ...%(ext)s` с
+последующим rename.
+
+**S-M8. `ai_style.py:26` (+ emotion_style:14, genre_template:16) — неограниченные кэши,
+ключ = путь**
+Та же проблема stale-кэша, что и S-C2, плюс рост памяти.
+**Фикс:** ключ path+mtime+size, LRU/TTL-ограничение.
+
+**S-M9. `database.py:584–607` — квота: TOCTOU + render_quota никогда не чистится**
+Два параллельных рендера проходят check до record → перерасход лимита; таблица растёт
+бесконечно.
+**Фикс:** атомарный `INSERT ... SELECT` с count-проверкой в одной транзакции;
+периодическая чистка записей старше 48ч.
+
+**S-M10. `bpm_detector.py:38–43` — эвристика октавного деления ломает честные
+>140 BPM жанры**
+Легитимные 150–170 BPM (d&b) урезаются вдвое → неверная бит-сетка для beat-effects.
+**Фикс:** выбирать октаву по уверенности beat_track (tempo interval) или отдавать
+оба и решать по автокорреляции.
+
+**S-M11. `database.py:111–126` — init_db глотает все исключения** → приложение тихо
+работает без БД. Фикс: перечислить известные невинные ошибки, остальные re-raise
+при старте.
+
+**S-M12. `audio_analyzer.py:98–108` — corrcoef → NaN на постоянной хроме
+(тишина/дрон)**
+`best_score` остаётся -1 → key «C major» с confidence −1 в API.
+**Фикс:** `np.nan_to_num` + guard `best_score < -0.5` → «unknown».
+
+**S-M13. `routers/transcription.py:110–111` — clip_start/clip_length Form без
+валидации** — отрицательные утекают в ffmpeg/whisper. Фикс: `ge=0` / `gt=0`.
+
+## LOW (services)
+
+- `stem_separator.py:84, 229` — `asyncio.get_event_loop()` deprecated в 3.11 →
+  `get_running_loop()`.
+- `stem_separator.py:214` — side-channel pan-трюк не даёт настоящий instrumental
+  (центровые инструменты теряются) — функциональная неточность.
+- `video_renderer.py:26` — `progress_callback` нигде не используется (мёртвый
+  параметр).
+- `subtitle_generator.py:20` — `total_dur` вычислен и не используется;
+  `forced_alignment.py:30–40` `_group_lyrics_lines` — dead code.
+- `subtitle_generator.py:343` — SecondaryColour задаётся для karaoke, но `\k`-теги
+  не генерируются → мёртвое поле.
+- `bpm_detector.py:108` — в interpolation-ветке `starts.append(beats[-1])` без
+  проверки `< duration` (несогласовано с фильтром выше).
+- `routers/video.py:60` — `timestamps=""` → `float('')` → необработанный 500.
+- `database.py:268` — delete_project не чистит render_quota и файлы рендеров на диске.
+- `downloader.py:39` — duration по умолчанию 0 при отсутствии метаданных → риск
+  деления на 0 ниже по стеку.
+
+## ДУБЛИКАЦИЯ: ai_style.py / emotion_style.py / genre_template.py
+
+**Ключевой вывод: `genre_template.py` и `emotion_style.py` — мёртвый код.**
+Grep по всему бэкенду: `from services.genre_template import` /
+`from services.emotion_style import` — **0 импортов**. Единственный живой путь —
+`ai_style.analyze_style` (используется в `routers/features.py`).
+
+Что дублируется (уже с дрейфом):
+- `GENRE_TEMPLATE_MAP` ×2: `genre_template.py:20` vs `ai_style.py:31` — в ai_style
+  добавлены ключи `hiphop`, `reggae` → словари уже разошлись.
+- `MOOD_STYLE_MAP` ×2: `emotion_style.py:19` vs `ai_style.py:112` — пока идентичны,
+  но дрейф неизбежен.
+- `_mood_to_style`, `_genre_to_template`, HF-классификация (30s mid-sample),
+  heuristic-fallback маппинги — продублированы целиком между ai_style и мёртвыми
+  модулями (`ai_style.py:296–331` ≈ `emotion_style.py:164–198` +
+  `genre_template.py:177–208`).
+- Три отдельных кэша (`_style_cache`, `_emotion_cache`, `_genre_cache`) для одного
+  и того же аудио.
+- `genre_template.py:141` создаёт HF pipeline **на каждый вызов** (медленно) vs
+  singleton в ai_style.
+- Интеграция Music2Emo сделана двумя разными способами: ai_style — через `os.chdir`-хак
+  (см. S-C1), emotion_style — прямой импорт.
+- Дополнительно: `_heuristic_fallback` в ai_style и `_fallback_emotion` в
+  emotion_style содержат идентичный dict `mood_map`.
+
+**Рекомендация:** удалить `genre_template.py` и `emotion_style.py` (или оставить
+re-export из ai_style на случай внешних callers); убрать `os.chdir` (S-C1) при
+рефакторинге.
+
+---
+
+## Обновлённый сводный итог (весь проект, обе части ревью)
+
+| Слой | Critical | High | Medium | Low |
+|------|----------|------|--------|-----|
+| Routers + Security + Infra (Часть 1) | 5 | 7 | 10 | 5 |
+| Services (Приложение B) | 2 | 8 | 13 | 9 |
+| **Всего (уникальных)** | **7** | **15** | **23** | **14** |
+
+### Топ-приоритет фиксов (обновлённый, объединённый):
+
+| # | Фикс | Время | Закрывает |
+|---|------|-------|-----------|
+| 1 | Файл-серверы: strict basename + whitelist ext + dotfiles ban | ~30 мин | C1 |
+| 2 | Double-offset: clip_start=0 для сегмента | ~15 мин | C3 |
+| 3 | pbkdf2 пароли + RAPTOK_SECRET в compose | ~45 мин | C2 |
+| 4 | asyncio.to_thread для render/subprocess | ~40 мин | C4 |
+| 5 | Re-cut сегмента на reload | ~20 мин | C5 |
+| 6 | **os.chdir убрать из ai_style.py** (Music2Emo ломает CWD!) | ~15 мин | S-C1 |
+| 7 | **Кэш вокала по mtime+size** (чужой вокал в транскрипции!) | ~20 мин | S-C2 |
+| 8 | try/finally work_dir + .ass cleanup + TimeoutExpired | ~30 мин | S-H1, S-H5 |
+| 9 | Form-валидация (ge=0/gt=0) на audio + transcription | ~15 мин | S-H8, S-M13 |
+| 10 | md5 вместо hash() + cleanup-крон tmp 24h | ~30 мин | H1 |
+
+**Critical-пакет (1-7): ~3 часа работы.**
