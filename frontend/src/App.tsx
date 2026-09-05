@@ -288,13 +288,16 @@ function App() {
             />
           )}
 
-          {/* Step 1: Auto Analysis */}
+          {/* Step 1: Auto Analysis + Range Selection */}
           {step === 1 && (
             <AnalysisPanel
               loading={analysisLoading}
               bpmData={bpmData}
               trackAnalysis={trackAnalysis}
               audioDuration={audioDuration}
+              audioPath={audioPath}
+              clipRange={clipRange}
+              onClipRangeChange={handleClipRangeChange}
             />
           )}
 
@@ -318,6 +321,7 @@ function App() {
                 onAudioStartChange={setAudioStart}
                 onRangeChange={handleClipRangeChange}
                 active={step === 2}
+                clipRange={clipRange}
                 style={style}
                 onStyleChange={setStyle}
                 templateId={templateId}

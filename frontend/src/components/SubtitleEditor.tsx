@@ -35,6 +35,7 @@ interface Props {
   onRangeChange?: (start: number, end: number) => void;
   active?: boolean;
   showStylePanel?: boolean;
+  clipRange?: { start: number; end: number } | null;
 }
 
 export function SubtitleEditor({
@@ -47,7 +48,7 @@ export function SubtitleEditor({
   templateId, onTemplateChange,
   onApplyStyle: _onApplyStyle, onApplyTemplate: _onApplyTemplate,
   onLyricsChange: _onLyricsChange, autoDetectedText: _autoDetectedText,
-  onRangeChange, active = true,
+  onRangeChange, active = true, clipRange,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
@@ -97,20 +98,29 @@ export function SubtitleEditor({
   const [isPlaying, setIsPlaying] = useState(false);
 
   // ── Load audio info ──
+  // v3: If clipRange is already set (from Analysis step), use it — don't override with suggested
   useEffect(() => {
     if (audioPath && !audioInfo) {
       setAudioLoading(true);
       api.audioInfo(audioPath)
         .then(info => {
           setAudioInfo(info);
-          setAudioStart(info.suggested_start);
-          setAudioEnd(info.suggested_end);
-          onAudioStartChange?.(info.suggested_start);
+          if (clipRange) {
+            // Use range from Analysis step
+            setAudioStart(clipRange.start);
+            setAudioEnd(clipRange.end);
+            onAudioStartChange?.(clipRange.start);
+          } else {
+            // Fallback: use suggested range
+            setAudioStart(info.suggested_start);
+            setAudioEnd(info.suggested_end);
+            onAudioStartChange?.(info.suggested_start);
+          }
         })
         .catch(e => console.error('Audio info failed:', e))
         .finally(() => setAudioLoading(false));
     }
-  }, [audioPath, audioInfo, onAudioStartChange]);
+  }, [audioPath, audioInfo, onAudioStartChange, clipRange]);
 
   useEffect(() => {
     onAudioStartChange?.(audioStart);
