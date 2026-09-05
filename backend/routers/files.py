@@ -42,7 +42,8 @@ async def audio_preview(filename: str):
     """Serve audio file for preview playback."""
     for f in TEMP_DIR.iterdir():
         if filename in f.name:
-            return FileResponse(str(f), media_type="audio/mpeg")
+            media = "audio/wav" if f.suffix == ".wav" else "audio/mpeg"
+            return FileResponse(str(f), media_type=media)
     raise HTTPException(status_code=404, detail="Audio file not found")
 
 

@@ -97,6 +97,15 @@ export function SubtitleEditor({
   const [playTime, setPlayTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // ── Reset audioInfo when audioPath changes (full track → segment) ──
+  const prevAudioPath = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevAudioPath.current !== audioPath) {
+      prevAudioPath.current = audioPath;
+      setAudioInfo(null); // Force reload audioInfo for the new file
+    }
+  }, [audioPath]);
+
   // ── Load audio info ──
   // v3: If clipRange is set (from Analysis), the segment is already cut.
   // audioPath = segment file (starts at 0). audioStart=0, audioEnd=segment duration.
