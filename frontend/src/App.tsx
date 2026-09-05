@@ -33,43 +33,99 @@ function App() {
   const [userRole, setUserRole] = useState('user');
   const [step, setStep] = useState<Step>(0);
 
+  // ── Persisted state: saved to localStorage on every change, restored on mount ──
+  const STORAGE_KEY = 'raptok_session_v3';
+
+  // Helper: load from localStorage
+  const loadState = (): Partial<typeof initialState> => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  };
+
+  const initialState = {
+    audioPath: null as string | null,
+    audioName: null as string | null,
+    audioDuration: null as number | null,
+    bpmData: null as BPMResult | null,
+    trackAnalysis: null as TrackAnalysis | null,
+    lyrics: '',
+    subtitles: [] as SubtitleLine[],
+    wordTimings: [] as WordTiming[],
+    style: defaultStyle,
+    karaoke: true,
+    displayMode: 'auto' as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word',
+    templateId: '',
+    beatDivision: '1/4',
+    audioStart: 0,
+    clipRange: null as { start: number; end: number } | null,
+    videoInfo: null as VideoInfo | null,
+    fragments: [] as Fragment[],
+    beatEffectsOn: false,
+    zoomIntensity: 0.08,
+    flashIntensity: 0.3,
+    shakeIntensity: 0,
+    step: 0 as Step,
+  };
+
+  const saved = loadState();
+
   // Audio (Step 0)
-  const [audioPath, setAudioPath] = useState<string | null>(null);
-  const [audioName, setAudioName] = useState<string | null>(null);
-  const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioPath, setAudioPath] = useState<string | null>(saved.audioPath ?? initialState.audioPath);
+  const [audioName, setAudioName] = useState<string | null>(saved.audioName ?? initialState.audioName);
+  const [audioDuration, setAudioDuration] = useState<number | null>(saved.audioDuration ?? initialState.audioDuration);
 
   // Analysis (Step 1)
-  const [bpmData, setBpmData] = useState<BPMResult | null>(null);
-  const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(null);
+  const [bpmData, setBpmData] = useState<BPMResult | null>(saved.bpmData ?? initialState.bpmData);
+  const [trackAnalysis, setTrackAnalysis] = useState<TrackAnalysis | null>(saved.trackAnalysis ?? initialState.trackAnalysis);
   const [whisperText, setWhisperText] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
 
   // Lyrics (Step 2)
-  const [lyrics, setLyrics] = useState('');
-  const [subtitles, setSubtitles] = useState<SubtitleLine[]>([]);
-  const [wordTimings, setWordTimings] = useState<WordTiming[]>([]);
-  const [style, setStyle] = useState<SubtitleStyle>(defaultStyle);
-  const [karaoke, setKaraoke] = useState(true);
-  const [displayMode, setDisplayMode] = useState<'auto' | 'line_highlight' | 'word_by_word' | 'single_word'>('auto');
-  const [templateId, setTemplateId] = useState('');
-  const [beatDivision, setBeatDivision] = useState('1/4');
-  const [audioStart, setAudioStart] = useState(0);
-  const [clipRange, setClipRange] = useState<{ start: number; end: number } | null>(null);
+  const [lyrics, setLyrics] = useState(saved.lyrics ?? initialState.lyrics);
+  const [subtitles, setSubtitles] = useState<SubtitleLine[]>(saved.subtitles ?? initialState.subtitles);
+  const [wordTimings, setWordTimings] = useState<WordTiming[]>(saved.wordTimings ?? initialState.wordTimings);
+  const [style, setStyle] = useState<SubtitleStyle>(saved.style ?? initialState.style);
+  const [karaoke, setKaraoke] = useState(saved.karaoke ?? initialState.karaoke);
+  const [displayMode, setDisplayMode] = useState<'auto' | 'line_highlight' | 'word_by_word' | 'single_word'>(saved.displayMode ?? initialState.displayMode);
+  const [templateId, setTemplateId] = useState(saved.templateId ?? initialState.templateId);
+  const [beatDivision, setBeatDivision] = useState(saved.beatDivision ?? initialState.beatDivision);
+  const [audioStart, setAudioStart] = useState(saved.audioStart ?? initialState.audioStart);
+  const [clipRange, setClipRange] = useState<{ start: number; end: number } | null>(saved.clipRange ?? initialState.clipRange);
 
   // Video (Step 3)
-  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(saved.videoInfo ?? initialState.videoInfo);
 
   // Fragments (Step 4)
-  const [fragments, setFragments] = useState<Fragment[]>([]);
+  const [fragments, setFragments] = useState<Fragment[]>(saved.fragments ?? initialState.fragments);
 
   // Beat effects (Step 5)
-  const [beatEffectsOn, setBeatEffectsOn] = useState(false);
-  const [zoomIntensity, setZoomIntensity] = useState(0.08);
-  const [flashIntensity, setFlashIntensity] = useState(0.3);
-  const [shakeIntensity, setShakeIntensity] = useState(0);
+  const [beatEffectsOn, setBeatEffectsOn] = useState(saved.beatEffectsOn ?? initialState.beatEffectsOn);
+  const [zoomIntensity, setZoomIntensity] = useState(saved.zoomIntensity ?? initialState.zoomIntensity);
+  const [flashIntensity, setFlashIntensity] = useState(saved.flashIntensity ?? initialState.flashIntensity);
+  const [shakeIntensity, setShakeIntensity] = useState(saved.shakeIntensity ?? initialState.shakeIntensity);
 
   // Dashboard
   const [showDashboard, setShowDashboard] = useState(false);
+
+  // ── Persist to localStorage on every state change ──
+  useEffect(() => {
+    const data = {
+      audioPath, audioName, audioDuration,
+      bpmData, trackAnalysis,
+      lyrics, subtitles, wordTimings, style, karaoke, displayMode,
+      templateId, beatDivision, audioStart, clipRange,
+      videoInfo, fragments,
+      beatEffectsOn, zoomIntensity, flashIntensity, shakeIntensity,
+      step,
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Failed to save session:', e);
+    }
+  }, [audioPath, audioName, audioDuration, bpmData, trackAnalysis, lyrics, subtitles, wordTimings, style, karaoke, displayMode, templateId, beatDivision, audioStart, clipRange, videoInfo, fragments, beatEffectsOn, zoomIntensity, flashIntensity, shakeIntensity, step]);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -479,6 +535,10 @@ function App() {
             setWordTimings([]);
             setVideoInfo(null);
             setFragments([]);
+            setClipRange(null);
+            setAudioStart(0);
+            // Clear localStorage
+            localStorage.removeItem('raptok_session_v3');
           }}
         />
       )}

@@ -47,7 +47,7 @@ export function SubtitleEditor({
   style, onStyleChange,
   templateId, onTemplateChange,
   onApplyStyle: _onApplyStyle, onApplyTemplate: _onApplyTemplate,
-  onLyricsChange: _onLyricsChange, autoDetectedText: _autoDetectedText,
+  onLyricsChange, autoDetectedText: _autoDetectedText,
   onRangeChange, active = true, clipRange,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
@@ -715,6 +715,24 @@ export function SubtitleEditor({
             currentTime={playTime}
             isPlaying={isPlaying}
             onPlayPause={togglePlay}
+          />
+        </div>
+      )}
+
+      {/* ── Lyrics textarea (optional — used as alignment hint for WhisperX) ── */}
+      {audioPath && (
+        <div className="bg-white/5 rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">📝 Lyrics (optional — improves alignment accuracy)</span>
+            {lyrics.trim() && (
+              <span className="text-[10px] text-green-400">✓ {lyrics.trim().split(/\s+/).length} words</span>
+            )}
+          </div>
+          <textarea
+            value={lyrics}
+            onChange={(e) => onLyricsChange?.(e.target.value)}
+            placeholder="Paste lyrics here for better transcription accuracy..."
+            className="w-full h-20 bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-3 py-2 text-sm text-gray-200 resize-none focus:border-purple-500 focus:outline-none"
           />
         </div>
       )}
