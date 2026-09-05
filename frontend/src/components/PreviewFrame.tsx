@@ -31,7 +31,7 @@ function assToHex(ass: string): string {
 export function PreviewFrame({
   subtitles,
   wordTimings,
-  displayMode,
+  displayMode: _displayMode,
   style,
   audioStart,
   currentTime,
@@ -70,9 +70,8 @@ export function PreviewFrame({
     if (lineText.length > 30 || sub.words.length > 6) longLines++;
     else shortLines++;
   }
-  const effectiveMode = displayMode === 'auto'
-    ? (longLines > shortLines ? 'single_word' : 'line_highlight')
-    : displayMode;
+  // Always single_word — no line_highlight mode
+  const effectiveMode = 'single_word';
 
   const posStyle: React.CSSProperties =
     style.position === 'top' ? { top: `${marginPx}px` }

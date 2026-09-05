@@ -59,37 +59,29 @@ def render_clip(
         template=template,
     )
     
-    # Step 2: Extract each fragment
+    # Step 2: Extract each fragment — accurate seek (input -ss) + re-encode for frame precision
     frag_paths = []
     for i, frag in enumerate(fragments):
         frag_path = work_dir / f"frag_{i:02d}.mp4"
+        # -ss AFTER -i = accurate frame-level seek (slower but precise)
+        # Re-encode (not -c copy) to ensure exact cut points
         cmd = [
             "ffmpeg", "-y",
+            "-i", str(video_path),
             "-ss", str(frag.start),
             "-t", str(frag.duration),
-            "-i", str(video_path),
-            "-c", "copy",
+            "-c:v", "libx264", "-preset", "fast",
+            "-crf", "18",
+            "-an",
             "-avoid_negative_ts", "make_zero",
             str(frag_path)
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         if result.returncode != 0:
-            # Fallback: re-encode if copy fails (different codecs)
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(frag.start),
-                "-t", str(frag.duration),
-                "-i", str(video_path),
-                "-c:v", "libx264", "-preset", "fast",
-                "-c:a", "aac",
-                str(frag_path)
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if result.returncode != 0:
-                raise RuntimeError(f"Fragment {i} extraction failed: {result.stderr[:300]}")
+            raise RuntimeError(f"Fragment {i} extraction failed: {result.stderr[:300]}")
         frag_paths.append(str(frag_path))
     
-    # Step 3: Concatenate fragments
+    # Step 3: Concatenate fragments — re-encode for seamless stitching + exact duration
     concat_path = work_dir / "concat.mp4"
     concat_list = work_dir / "concat_list.txt"
     concat_list.write_text("\n".join(f"file '{p}'" for p in frag_paths))
@@ -98,22 +90,13 @@ def render_clip(
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0",
         "-i", str(concat_list),
-        "-c", "copy",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-an",
+        "-avoid_negative_ts", "make_zero",
         str(concat_path)
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
-        # Fallback: re-encode concat
-        cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", str(concat_list),
-            "-c:v", "libx264", "-preset", "fast",
-            "-c:a", "aac",
-            str(concat_path)
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if result.returncode != 0:
             raise RuntimeError(f"Concat failed: {result.stderr[:300]}")
     
     # Step 4: Scale to TikTok format + blur background + burn subtitles
@@ -206,6 +189,9 @@ def render_clip(
         scale_filter = scale_filter.replace("[final]", "[composed]")
         scale_filter += f";[composed]{beat_effect_filter}[final]"
 
+    # Calculate exact total duration from fragments
+    total_duration = sum(f.duration for f in fragments)
+    
     cmd = [
         "ffmpeg", "-y",
         "-i", str(concat_path),
@@ -219,6 +205,7 @@ def render_clip(
         "-r", str(OUTPUT_FPS),
         "-c:a", "aac",
         "-b:a", "192k",
+        "-t", str(total_duration),  # hard cut at exact fragment duration
         "-shortest",
         "-movflags", "+faststart",
         str(output_path)

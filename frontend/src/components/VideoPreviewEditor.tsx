@@ -199,7 +199,7 @@ export function VideoPreviewEditor({
     };
 
     if (displayMode === 'word_by_word' && activeWord) {
-      // Show only active word, highlighted
+      // word_by_word: active word scaled up
       return (
         <div style={{ ...baseStyle, color: activeCss, transform: 'scale(1.15)', transition: 'all 0.1s' }}>
           {activeWord.word}
@@ -207,7 +207,8 @@ export function VideoPreviewEditor({
       );
     }
 
-    if (displayMode === 'single_word' && activeWord) {
+    // single_word / line_highlight / auto / default — show ONLY active word
+    if (activeWord) {
       return (
         <div style={{ ...baseStyle, color: activeCss }}>
           {activeWord.word}
@@ -215,26 +216,8 @@ export function VideoPreviewEditor({
       );
     }
 
-    // line_highlight / auto — show only current + past words, hide future
-    const words = activeSub.words || [];
-    return (
-      <div style={baseStyle}>
-        {words.length > 0 ? words.map((w, i) => {
-          const isActive = currentTime >= w.start && currentTime <= w.end;
-          const isPast = currentTime > w.end;
-          const isFuture = currentTime < w.start;
-          if (isFuture) return null; // hide future words during pauses
-          return (
-            <span key={i} style={{
-              color: isActive ? activeCss : isPast ? `${primaryCss}88` : primaryCss,
-              transition: 'color 0.1s',
-            }}>
-              {w.word}{i < words.length - 1 ? ' ' : ''}
-            </span>
-          );
-        }) : activeSub.text}
-      </div>
-    );
+    // No active word → show nothing (clean pause)
+    return null;
   };
 
   // Scale: preview is ~270px wide (half of 540), video is 1080px wide
@@ -456,20 +439,8 @@ export function VideoPreviewEditor({
                 />
               </div>
 
-              {/* Display mode */}
-              <div>
-                <label className="text-[10px] text-gray-500 mb-1 block">Display mode</label>
-                <select
-                  value={displayMode}
-                  onChange={e => onDisplayModeChange(e.target.value as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word')}
-                  className="w-full bg-[#0f0f17] border border-[#2a2a3a] rounded px-2 py-1.5 text-sm text-white outline-none focus:border-purple-500"
-                >
-                  <option value="line_highlight">Line highlight (full line, active word colored)</option>
-                  <option value="word_by_word">Word by word (one word at a time, scaled)</option>
-                  <option value="single_word">Single word (one word, no scale)</option>
-                  <option value="auto">Auto (detect from template)</option>
-                </select>
-              </div>
+              {/* Display mode — fixed to single_word */}
+              <input type="hidden" value="single_word" readOnly />
 
               {/* Karaoke */}
               <label className="flex items-center gap-2 cursor-pointer">
@@ -526,6 +497,33 @@ export function VideoPreviewEditor({
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                   onEnded={() => { setIsPlaying(false); if (audioRef.current) audioRef.current.pause(); }}
+                  onSeeked={() => {
+                    // After seek completes, sync audio position and resume if was playing
+                    if (videoRef.current && audioRef.current) {
+                      audioRef.current.currentTime = videoRef.current.currentTime;
+                    }
+                    if (isPlaying && videoRef.current && videoRef.current.paused) {
+                      videoRef.current.play().catch(() => {});
+                      if (audioRef.current) audioRef.current.play().catch(() => {});
+                    }
+                  }}
+                  onWaiting={() => {
+                    // Buffer — pause audio too
+                    if (audioRef.current && !audioRef.current.paused) audioRef.current.pause();
+                  }}
+                  onCanPlay={() => {
+                    // Buffered — resume if should be playing
+                    if (isPlaying && videoRef.current && videoRef.current.paused) {
+                      videoRef.current.play().catch(() => {});
+                      if (audioRef.current) audioRef.current.play().catch(() => {});
+                    }
+                  }}
+                  onStalled={() => {
+                    // Reload video if stalled
+                    if (videoRef.current && !videoRef.current.readyState) {
+                      videoRef.current.load();
+                    }
+                  }}
                   className="absolute inset-0 w-full h-full object-cover"
                   muted
                   playsInline

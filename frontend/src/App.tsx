@@ -55,7 +55,7 @@ function App() {
     wordTimings: [] as WordTiming[],
     style: defaultStyle,
     karaoke: true,
-    displayMode: 'auto' as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word',
+    displayMode: 'single_word' as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word',
     templateId: '',
     beatDivision: '1/4',
     audioStart: 0,

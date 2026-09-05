@@ -148,28 +148,47 @@ async def prepare_preview(req: PreparePreviewRequest):
         job_id = f"preview_{os.urandom(6).hex()}"
         total_video_dur = sum(f.duration for f in fragments)
 
-        # ── 1. Concat VIDEO fragments ──
+        # ── 1. Concat VIDEO fragments — re-encode for frame precision ──
+        # Extract each fragment separately, then concat (accurate cut points)
+        frag_files = []
+        for i, frag in enumerate(fragments):
+            frag_file = TEMP_DIR / f"{job_id}_frag_{i}.mp4"
+            r = subprocess.run([
+                "ffmpeg", "-y",
+                "-i", str(req.video_path),
+                "-ss", str(frag.start),
+                "-t", str(frag.duration),
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+                "-an",
+                "-avoid_negative_ts", "make_zero",
+                str(frag_file)
+            ], capture_output=True, timeout=60)
+            if r.returncode == 0:
+                frag_files.append(str(frag_file))
+
+        if not frag_files:
+            raise HTTPException(status_code=500, detail="Failed to extract any fragments")
+
         concat_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-        for frag in fragments:
-            concat_file.write(f"file '{req.video_path}'\n")
-            concat_file.write(f"inpoint {frag.start}\n")
-            concat_file.write(f"outpoint {frag.start + frag.duration}\n")
+        for fp in frag_files:
+            concat_file.write(f"file '{fp}'\n")
         concat_file.close()
 
         preview_video = TEMP_DIR / f"{job_id}.mp4"
         result = subprocess.run([
             "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-            "-i", concat_file.name, "-c", "copy",
+            "-i", concat_file.name,
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-an",
+            "-avoid_negative_ts", "make_zero",
+            "-t", str(total_video_dur),  # hard cut at exact duration
             str(preview_video)
-        ], capture_output=True, timeout=120)
+        ], capture_output=True, timeout=180)
 
-        if result.returncode != 0:
-            result = subprocess.run([
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_file.name,
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-an",
-                str(preview_video)
-            ], capture_output=True, timeout=180)
+        # Cleanup fragment files
+        for fp in frag_files:
+            try: os.unlink(fp)
+            except: pass
         os.unlink(concat_file.name)
 
         # ── 2. Extract AUDIO segment (continuous slice from audio_start) ──
@@ -182,6 +201,7 @@ async def prepare_preview(req: PreparePreviewRequest):
                 "-ss", str(audio_start), "-t", str(total_video_dur),
                 "-i", req.audio_path,
                 "-ac", "2", "-ab", "128k",
+                "-t", str(total_video_dur),  # hard cut — no trailing silence
                 str(preview_audio)
             ], capture_output=True, timeout=120)
             if result.returncode != 0:
