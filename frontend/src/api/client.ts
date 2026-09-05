@@ -356,6 +356,8 @@ export const api = {
   getProject: (id: string) => getJSON(`${API_BASE}/projects/${id}`),
   saveProject: (id: string, data: any) => putJSON(`${API_BASE}/projects/${id}`, data),
   deleteProject: (id: string) => delJSON(`${API_BASE}/projects/${id}`),
+  saveProjectState: (id: string, state: any) => putJSON(`${API_BASE}/projects/${id}/state`, { state }),
+  getProjectState: (id: string) => getJSON(`${API_BASE}/projects/${id}/state`),
 
   // ── Renders ──
   listRenders: () => getJSON(`${API_BASE}/renders`),

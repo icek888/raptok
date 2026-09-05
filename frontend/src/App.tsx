@@ -109,6 +109,9 @@ function App() {
 
   // Dashboard
   const [showDashboard, setShowDashboard] = useState(false);
+  // Project persistence
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Persist to localStorage on every state change ──
   useEffect(() => {
@@ -127,6 +130,27 @@ function App() {
       console.warn('Failed to save session:', e);
     }
   }, [audioPath, audioName, audioDuration, bpmData, trackAnalysis, lyrics, subtitles, wordTimings, style, karaoke, displayMode, templateId, beatDivision, audioStart, clipRange, videoInfo, fragments, beatEffectsOn, zoomIntensity, flashIntensity, shakeIntensity, step]);
+
+  // ── Auto-save to SQLite (debounced 3s) ──
+  useEffect(() => {
+    if (!currentProjectId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const stateData = {
+        audioPath, audioName, audioDuration,
+        bpmData, trackAnalysis,
+        lyrics, subtitles, wordTimings, style, karaoke, displayMode,
+        templateId, beatDivision, audioStart, clipRange,
+        videoInfo, fragments,
+        beatEffectsOn, zoomIntensity, flashIntensity, shakeIntensity,
+        step,
+      };
+      api.saveProjectState(currentProjectId, stateData)
+        .then(() => console.log('Auto-saved project:', currentProjectId))
+        .catch(e => console.warn('Auto-save failed:', e));
+    }, 3000);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [currentProjectId, audioPath, audioName, audioDuration, bpmData, trackAnalysis, lyrics, subtitles, wordTimings, style, karaoke, displayMode, templateId, beatDivision, audioStart, clipRange, videoInfo, fragments, beatEffectsOn, zoomIntensity, flashIntensity, shakeIntensity, step]);
 
   // ── Auth check on mount ──
   useEffect(() => {
@@ -151,6 +175,53 @@ function App() {
   };
 
   // ── Step 0: Audio ready → auto-trigger Step 1 analysis ──
+  // ── New Project: create in DB, reset state ──
+  const handleNewProject = async () => {
+    try {
+      const project = await api.createProject();
+      setCurrentProjectId(project.id);
+      console.log('New project created:', project.id);
+    } catch (e) {
+      console.error('Create project failed:', e);
+    }
+  };
+
+  // ── Open Project: load state from DB ──
+  const handleOpenProject = async (projectId: string) => {
+    try {
+      const res = await api.getProjectState(projectId);
+      const s = res.state;
+      setShowDashboard(false);
+      setCurrentProjectId(projectId);
+      setAudioPath(s.audioPath || null);
+      setAudioName(s.audioName || null);
+      setAudioDuration(s.audioDuration || null);
+      setBpmData(s.bpmData || null);
+      setTrackAnalysis(s.trackAnalysis || null);
+      setLyrics(s.lyrics || '');
+      setSubtitles(s.subtitles || []);
+      setWordTimings(s.wordTimings || []);
+      if (s.style) setStyle(s.style);
+      setKaraoke(s.karaoke ?? true);
+      if (s.displayMode) setDisplayMode(s.displayMode);
+      if (s.templateId) setTemplateId(s.templateId);
+      if (s.beatDivision) setBeatDivision(s.beatDivision);
+      setAudioStart(s.audioStart || 0);
+      setClipRange(s.clipRange || null);
+      setVideoInfo(s.videoInfo || null);
+      setFragments(s.fragments || []);
+      setBeatEffectsOn(s.beatEffectsOn || false);
+      setZoomIntensity(s.zoomIntensity || 0.08);
+      setFlashIntensity(s.flashIntensity || 0.3);
+      setShakeIntensity(s.shakeIntensity || 0);
+      setStep(s.step || 0);
+      console.log('Project loaded:', projectId, 'step:', s.step);
+    } catch (e) {
+      console.error('Open project failed:', e);
+      alert('Failed to load project. It may be empty or corrupted.');
+    }
+  };
+
   const handleAudioReady = (path: string, name: string, duration: number) => {
     setAudioPath(path);
     setAudioName(name);
@@ -527,6 +598,7 @@ function App() {
           username={username}
           role={userRole}
           onClose={() => setShowDashboard(false)}
+          onOpenProject={handleOpenProject}
           onNewProject={() => {
             setShowDashboard(false);
             setStep(0);
@@ -545,8 +617,11 @@ function App() {
             setFragments([]);
             setClipRange(null);
             setAudioStart(0);
+            setSegmentPath(null);
             // Clear localStorage
             localStorage.removeItem('raptok_session_v3');
+            // Create new project in DB
+            handleNewProject();
           }}
         />
       )}

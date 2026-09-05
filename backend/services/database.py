@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS projects (
     karaoke INTEGER DEFAULT 1,
     audio_start REAL DEFAULT 0,
     beat_effects_json TEXT,
+    state_json TEXT,
     status TEXT DEFAULT 'draft',
     created_at REAL,
     updated_at REAL
@@ -108,11 +109,16 @@ def _get_db() -> sqlite3.Connection:
 
 
 def init_db():
-    """Initialize database — create tables if not exist."""
+    """Initialize database — create tables if not exist, run migrations."""
     try:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = _get_db()
         conn.executescript(SCHEMA)
+        # Migration: add state_json column if not exists
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(projects)").fetchall()]
+        if "state_json" not in cols:
+            conn.execute("ALTER TABLE projects ADD COLUMN state_json TEXT")
+            logger.info("Migration: added state_json column to projects")
         conn.commit()
         conn.close()
         logger.info(f"SQLite initialized: {DB_PATH}")
@@ -216,6 +222,40 @@ def list_projects(user: str, limit: int = 50) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def save_state(user: str, project_id: str, state: dict) -> bool:
+    """Save full state snapshot to project. Called on auto-save (debounced)."""
+    now = time.time()
+    conn = _get_db()
+    row = conn.execute("SELECT id FROM projects WHERE id = ? AND user = ?", (project_id, user)).fetchone()
+    if not row:
+        conn.close()
+        return False
+    conn.execute(
+        "UPDATE projects SET state_json = ?, updated_at = ? WHERE id = ? AND user = ?",
+        (json.dumps(state), now, project_id, user)
+    )
+    # Also update individual columns for Dashboard display
+    name = state.get("audioName") or state.get("name") or "Untitled"
+    conn.execute(
+        "UPDATE projects SET name = ?, audio_path = ?, audio_name = ?, lyrics = ?, status = ? WHERE id = ? AND user = ?",
+        (name, state.get("audioPath"), state.get("audioName"), state.get("lyrics", ""),
+         "active" if state.get("step", 0) > 0 else "draft", project_id, user)
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_state(user: str, project_id: str) -> dict | None:
+    """Get full state snapshot from project."""
+    conn = _get_db()
+    row = conn.execute("SELECT state_json FROM projects WHERE id = ? AND user = ?", (project_id, user)).fetchone()
+    conn.close()
+    if not row or not row["state_json"]:
+        return None
+    return json.loads(row["state_json"])
 
 
 def delete_project(user: str, project_id: str) -> bool:

@@ -79,6 +79,29 @@ async def save_project(request: Request, project_id: str, data: ProjectData):
     return result
 
 
+class StateData(BaseModel):
+    state: dict
+
+
+@router.put("/api/projects/{project_id}/state")
+async def save_project_state(request: Request, project_id: str, data: StateData):
+    """Auto-save full state snapshot."""
+    user = _get_user(request)
+    if not database.save_state(user, project_id, data.state):
+        raise HTTPException(404, "Project not found")
+    return {"status": "saved"}
+
+
+@router.get("/api/projects/{project_id}/state")
+async def get_project_state(request: Request, project_id: str):
+    """Load full state snapshot for restoring a project."""
+    user = _get_user(request)
+    state = database.get_state(user, project_id)
+    if not state:
+        raise HTTPException(404, "No state saved for this project")
+    return {"state": state}
+
+
 @router.delete("/api/projects/{project_id}")
 async def delete_project(request: Request, project_id: str):
     user = _get_user(request)
