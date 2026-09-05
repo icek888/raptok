@@ -20,6 +20,7 @@ interface Props {
   isPlaying: boolean;
   onPlayPause: () => void;
   lockRange?: boolean;
+  focusWordIdx?: number; // zoom to this word when it changes
 }
 
 const MAX_ZOOM = 80; // 80x zoom — very detailed word editing
@@ -30,6 +31,7 @@ export function TimelinePreview({
   onWordTimingsChange,
   onSeek, currentTime, isPlaying, onPlayPause,
   lockRange = false,
+  focusWordIdx = -1,
 }: Props) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [zoomCenter, setZoomCenter] = useState(0);
@@ -71,6 +73,20 @@ export function TimelinePreview({
       }
     }
   }, [audioStart, audioEnd, autoZoom, duration, zoomLevel, lockRange]);
+
+  // Zoom to selected word (from edit panel below)
+  useEffect(() => {
+    if (focusWordIdx < 0 || focusWordIdx >= wordTimings.length) return;
+    const w = wordTimings[focusWordIdx];
+    if (!w) return;
+    const wordCenter = (w.start + w.end) / 2;
+    const wordDuration = Math.max(0.5, w.end - w.start);
+    // Zoom so the word takes ~1/4 of viewport (comfortable for editing)
+    const targetZoom = Math.min(MAX_ZOOM, Math.max(4, duration / (wordDuration * 4)));
+    setZoomLevel(targetZoom);
+    setZoomCenter(wordCenter);
+    setAutoZoom(false); // manual zoom mode
+  }, [focusWordIdx, wordTimings, duration]);
 
   const viewportSize = duration / zoomLevel;
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));

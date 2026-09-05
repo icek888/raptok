@@ -683,6 +683,7 @@ export function SubtitleEditor({
             audioEnd={audioEnd}
             onRangeChange={undefined}
             lockRange={true}
+            focusWordIdx={selectedWordIdx}
             onWordTimingsChange={(timings) => {
               onWordTimingsChange(timings);
               // Live regen subtitles from timeline edits too (local, no API needed)
