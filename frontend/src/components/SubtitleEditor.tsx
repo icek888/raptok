@@ -48,7 +48,7 @@ export function SubtitleEditor({
   templateId, onTemplateChange,
   onApplyStyle: _onApplyStyle, onApplyTemplate: _onApplyTemplate,
   onLyricsChange, autoDetectedText: _autoDetectedText,
-  onRangeChange, active = true, clipRange,
+  onRangeChange: _onRangeChange, active = true, clipRange,
 }: Props) {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
@@ -88,7 +88,7 @@ export function SubtitleEditor({
 
   // ── Full-track word timings (absolute timestamps from whisper) ──
   // Once transcribed, we filter these by audioStart/audioEnd locally
-  const [fullTrackWords, setFullTrackWords] = useState<WordTiming[]>([]);
+  const [, setFullTrackWords] = useState<WordTiming[]>([]);
   const [hasFullTranscription, setHasFullTranscription] = useState(false);
 
   // ── Audio URL for preview ──
@@ -98,7 +98,8 @@ export function SubtitleEditor({
   const [isPlaying, setIsPlaying] = useState(false);
 
   // ── Load audio info ──
-  // v3: If clipRange is already set (from Analysis step), use it — don't override with suggested
+  // v3: If clipRange is set (from Analysis), the segment is already cut.
+  // audioPath = segment file (starts at 0). audioStart=0, audioEnd=segment duration.
   useEffect(() => {
     if (audioPath && !audioInfo) {
       setAudioLoading(true);
@@ -106,12 +107,11 @@ export function SubtitleEditor({
         .then(info => {
           setAudioInfo(info);
           if (clipRange) {
-            // Use range from Analysis step
-            setAudioStart(clipRange.start);
-            setAudioEnd(clipRange.end);
-            onAudioStartChange?.(clipRange.start);
+            // Working with a pre-cut segment — starts at 0, ends at segment duration
+            setAudioStart(0);
+            setAudioEnd(info.duration);
+            onAudioStartChange?.(0);
           } else {
-            // Fallback: use suggested range
             setAudioStart(info.suggested_start);
             setAudioEnd(info.suggested_end);
             onAudioStartChange?.(info.suggested_start);
@@ -119,6 +119,11 @@ export function SubtitleEditor({
         })
         .catch(e => console.error('Audio info failed:', e))
         .finally(() => setAudioLoading(false));
+    } else if (audioInfo && clipRange) {
+      // Segment already loaded — sync to segment boundaries
+      setAudioStart(0);
+      setAudioEnd(audioInfo.duration);
+      onAudioStartChange?.(0);
     }
   }, [audioPath, audioInfo, onAudioStartChange, clipRange]);
 
@@ -189,19 +194,20 @@ export function SubtitleEditor({
     setTranscribeStatus({ label: 'Starting...', progress: 0 });
 
     try {
-      // ── v3: Transcribe ONLY the selected segment (e.g. 37s, not full 5-min track) ──
-      const clipLen = audioEnd - audioStart;
+      // v3: If working with a pre-cut segment, no need to pass clip_start/clip_length
+      // The segment file is already the right duration. WhisperX transcribes the whole segment.
+      const isSegment = !!clipRange;
       const result = await api.transcribeFullStream(
         audioPath, transcribeLang, lyrics, whisperModel,
         (data) => setTranscribeStatus({ label: data.label, progress: data.progress, elapsed: data.elapsed }),
-        audioStart,  // clip_start = range start
-        clipLen,     // clip_length = range duration
+        isSegment ? 0 : audioStart,    // clip_start = 0 for pre-cut segment
+        isSegment ? 0 : (audioEnd - audioStart),  // clip_length = 0 = use whole file
       );
 
-      // Word timestamps are already shifted to absolute (clip_start offset) in backend
       setFullTrackWords(result.words);
       setHasFullTranscription(true);
-      const filtered = filterWordsByRange(result.words, audioStart, audioEnd);
+      // For pre-cut segment: words are already 0-based. For full track: filter by range.
+      const filtered = isSegment ? result.words : filterWordsByRange(result.words, audioStart, audioEnd);
       onWordTimingsChange(filtered);
       regenSubtitles(filtered);
 
@@ -223,28 +229,6 @@ export function SubtitleEditor({
         start: Math.max(0, w.start - start),  // convert to video-relative (0-based)
         end: Math.max(0, w.end - start),
       }));
-  };
-
-  // ── When range changes, re-filter locally (NO API call!) ──
-  const handleRangeChange = (start: number, end: number) => {
-    setAudioStart(start);
-    setAudioEnd(end);
-    onRangeChange?.(start, end);
-    
-    if (hasFullTranscription && fullTrackWords.length > 0) {
-      // Filter locally — instant, no server round-trip
-      const filtered = filterWordsByRange(fullTrackWords, start, end);
-      onWordTimingsChange(filtered);
-      
-      // Regenerate subtitles from filtered words
-      if (lyrics && fragments.length > 0) {
-        api.wordSplitSubtitles(lyrics, fragments, filtered, 0)
-          .then(r => onSubtitlesChange(r.subtitles))
-          .catch(e => console.error('Word split failed:', e));
-      }
-    }
-    
-    onAudioStartChange?.(start);
   };
 
   // ── Word Split (even distribution) ──
@@ -688,7 +672,8 @@ export function SubtitleEditor({
             audioInfo={audioInfo}
             audioStart={audioStart}
             audioEnd={audioEnd}
-            onRangeChange={handleRangeChange}
+            onRangeChange={undefined}
+            lockRange={true}
             onWordTimingsChange={(timings) => {
               onWordTimingsChange(timings);
               // Live regen subtitles from timeline edits too (local, no API needed)

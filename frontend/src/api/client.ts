@@ -211,6 +211,15 @@ export const api = {
   audioInfo: (audioPath: string): Promise<AudioInfo> =>
     postJSON(`${API_BASE}/audio-info`, { audio_path: audioPath }),
 
+  // ─── Cut segment from audio (after Analysis step) ───
+  cutSegment: (audioPath: string, clipStart: number, clipLength: number): Promise<{ segment_path: string; duration: number }> => {
+    const form = new FormData();
+    form.append('audio_path', audioPath);
+    form.append('clip_start', String(clipStart));
+    form.append('clip_length', String(clipLength));
+    return postForm(`${API_BASE}/cut-segment`, form);
+  },
+
   // ─── Deep Track Analysis (mood, energy, genre, hook) ───
   trackAnalysis: (audioPath: string): Promise<TrackAnalysis> =>
     postJSON(`${API_BASE}/track-analysis`, { audio_path: audioPath }),

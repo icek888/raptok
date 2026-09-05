@@ -93,6 +93,7 @@ function App() {
   const [beatDivision, setBeatDivision] = useState(saved.beatDivision ?? initialState.beatDivision);
   const [audioStart, setAudioStart] = useState(saved.audioStart ?? initialState.audioStart);
   const [clipRange, setClipRange] = useState<{ start: number; end: number } | null>(saved.clipRange ?? initialState.clipRange);
+  const [segmentPath, setSegmentPath] = useState<string | null>(null);
 
   // Video (Step 3)
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(saved.videoInfo ?? initialState.videoInfo);
@@ -193,8 +194,15 @@ function App() {
   // ── Step 2: Lyrics range selected → this defines the clip length (SOURCE OF TRUTH) ──
   const handleClipRangeChange = (start: number, end: number) => {
     setClipRange({ start, end });
-    // v3: clip range is the single source of truth — stored here, used on step 4 Auto Cut.
-    // No auto-cut here; user triggers it on Fragments step via CutToolsPanel.
+    // v3: Cut the segment immediately — Lyrics works only with this segment
+    if (audioPath && end > start) {
+      api.cutSegment(audioPath, start, end - start)
+        .then(res => {
+          setSegmentPath(res.segment_path);
+          console.log('Segment cut:', res.segment_path, res.duration + 's');
+        })
+        .catch(e => console.error('Cut segment failed:', e));
+    }
   };
 
   // ── Step 3: Video analyzed ──
@@ -366,7 +374,6 @@ function App() {
                 fragments={[]}
                 subtitles={subtitles}
                 onSubtitlesChange={setSubtitles}
-                audioPath={audioPath}
                 wordTimings={wordTimings}
                 onWordTimingsChange={setWordTimings}
                 karaoke={karaoke}
@@ -374,6 +381,7 @@ function App() {
                 displayMode={displayMode}
                 onDisplayModeChange={setDisplayMode}
                 videoUrl={null}
+                audioPath={segmentPath || audioPath}
                 onAudioStartChange={setAudioStart}
                 onRangeChange={handleClipRangeChange}
                 active={step === 2}

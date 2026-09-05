@@ -13,12 +13,13 @@ interface Props {
   audioInfo: AudioInfo | null;
   audioStart: number;
   audioEnd: number;
-  onRangeChange: (start: number, end: number) => void;
+  onRangeChange?: (start: number, end: number) => void;
   onWordTimingsChange?: (timings: WordTiming[]) => void;
   onSeek?: (time: number) => void;
   currentTime: number;
   isPlaying: boolean;
   onPlayPause: () => void;
+  lockRange?: boolean;
 }
 
 const MAX_ZOOM = 80; // 80x zoom — very detailed word editing
@@ -28,6 +29,7 @@ export function TimelinePreview({
   wordTimings, audioInfo, audioStart, audioEnd, onRangeChange,
   onWordTimingsChange,
   onSeek, currentTime, isPlaying, onPlayPause,
+  lockRange = false,
 }: Props) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [zoomCenter, setZoomCenter] = useState(0);
@@ -46,9 +48,20 @@ export function TimelinePreview({
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const duration = audioInfo?.duration || 0;
 
-  // Auto-zoom when range changes
+  // Auto-zoom to locked range on mount (when coming from Analysis with clipRange)
   useEffect(() => {
-    if (autoZoom && audioEnd > audioStart) {
+    if (lockRange && audioEnd > audioStart && duration > 0) {
+      const rangeSize = audioEnd - audioStart;
+      // Zoom so the segment fills ~80% of the viewport
+      const targetZoom = Math.min(MAX_ZOOM, Math.max(1, duration / (rangeSize * 1.25)));
+      setZoomLevel(targetZoom);
+      setZoomCenter((audioStart + audioEnd) / 2);
+    }
+  }, [lockRange, audioStart, audioEnd, duration]);
+
+  // Auto-zoom when range changes (only if not locked)
+  useEffect(() => {
+    if (!lockRange && autoZoom && audioEnd > audioStart) {
       setZoomCenter((audioStart + audioEnd) / 2);
       const rangeSize = audioEnd - audioStart;
       const viewportSize = duration / zoomLevel;
@@ -57,7 +70,7 @@ export function TimelinePreview({
         setZoomLevel(newZoom);
       }
     }
-  }, [audioStart, audioEnd, autoZoom, duration, zoomLevel]);
+  }, [audioStart, audioEnd, autoZoom, duration, zoomLevel, lockRange]);
 
   const viewportSize = duration / zoomLevel;
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
@@ -95,6 +108,7 @@ export function TimelinePreview({
   };
 
   const handleRangeMouseDown = (e: React.MouseEvent, mode: 'start' | 'end' | 'move') => {
+    if (lockRange) return; // Range is locked from Analysis step — no dragging
     e.stopPropagation();
     e.preventDefault();
     setDragging(true);
@@ -132,11 +146,11 @@ export function TimelinePreview({
     const handleMove = (e: MouseEvent) => {
       const deltaT = xToTime(e.clientX) - xToTime(dragStartX);
 
-      if (dragMode === 'range-start') {
+      if (dragMode === 'range-start' && onRangeChange) {
         onRangeChange(Math.max(0, Math.min(dragStartData.start + deltaT, dragStartData.end - 0.5)), dragStartData.end);
-      } else if (dragMode === 'range-end') {
+      } else if (dragMode === 'range-end' && onRangeChange) {
         onRangeChange(dragStartData.start, Math.min(duration, Math.max(dragStartData.end + deltaT, dragStartData.start + 0.5)));
-      } else if (dragMode === 'range-move') {
+      } else if (dragMode === 'range-move' && onRangeChange) {
         const rangeW = dragStartData.end - dragStartData.start;
         let ns = Math.max(0, Math.min(dragStartData.start + deltaT, duration - rangeW));
         onRangeChange(ns, ns + rangeW);
@@ -396,7 +410,7 @@ export function TimelinePreview({
 
         {/* Audio selection range */}
         <div
-          className="absolute top-0 bottom-0 border-2 border-yellow-500/50 bg-yellow-500/5 cursor-grab active:cursor-grabbing z-10"
+          className={`absolute top-0 bottom-0 border-2 border-yellow-500/50 bg-yellow-500/5 z-10 ${lockRange ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
           style={{ left: `${startPct}%`, width: `${Math.max(0.5, endPct - startPct)}%` }}
           onMouseDown={(e) => handleRangeMouseDown(e, 'move')}
         >
@@ -404,17 +418,21 @@ export function TimelinePreview({
             {formatTime(audioStart)}-{formatTime(audioEnd)}
           </span>
         </div>
-        {/* Range handles */}
-        <div className="absolute top-0 bottom-0 w-3 cursor-ew-resize z-20 flex items-center justify-center"
-          style={{ left: `calc(${startPct}% - 6px)` }}
-          onMouseDown={(e) => handleRangeMouseDown(e, 'start')}>
-          <div className="w-1 h-full bg-yellow-500 rounded-full" />
-        </div>
-        <div className="absolute top-0 bottom-0 w-3 cursor-ew-resize z-20 flex items-center justify-center"
-          style={{ left: `calc(${endPct}% - 6px)` }}
-          onMouseDown={(e) => handleRangeMouseDown(e, 'end')}>
-          <div className="w-1 h-full bg-yellow-500 rounded-full" />
-        </div>
+        {/* Range handles — hidden when locked */}
+        {!lockRange && (
+          <>
+            <div className="absolute top-0 bottom-0 w-3 cursor-ew-resize z-20 flex items-center justify-center"
+              style={{ left: `calc(${startPct}% - 6px)` }}
+              onMouseDown={(e) => handleRangeMouseDown(e, 'start')}>
+              <div className="w-1 h-full bg-yellow-500 rounded-full" />
+            </div>
+            <div className="absolute top-0 bottom-0 w-3 cursor-ew-resize z-20 flex items-center justify-center"
+              style={{ left: `calc(${endPct}% - 6px)` }}
+              onMouseDown={(e) => handleRangeMouseDown(e, 'end')}>
+              <div className="w-1 h-full bg-yellow-500 rounded-full" />
+            </div>
+          </>
+        )}
 
         {/* Word blocks — colorful, taller, bigger text when zoomed */}
         {visibleWords.map(({ w, i }) => {

@@ -1,5 +1,7 @@
-"""Audio analysis router: BPM, audio info, track analysis, beat-sync."""
+"""Audio analysis router: BPM, audio info, track analysis, beat-sync, segment cut."""
 import logging
+import os
+import asyncio
 from fastapi import APIRouter, Form, HTTPException
 from models.schemas import BPMRequest, BPMResult, BeatSyncRequest, BeatSyncResult, Fragment
 from services.bpm_detector import detect_bpm, get_beat_aligned_starts
@@ -7,6 +9,40 @@ from services.audio_analyzer import analyze_track
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.post("/api/cut-segment")
+async def api_cut_segment(
+    audio_path: str = Form(...),
+    clip_start: float = Form(...),
+    clip_length: float = Form(...),
+):
+    """Cut a segment from audio file. Returns path to the cut segment WAV.
+    Used after Analysis step — Lyrics works only with this segment.
+    """
+    if not os.path.exists(audio_path):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    # Output path: same dir, with _segment suffix
+    base = os.path.splitext(audio_path)[0]
+    seg_path = f"{base}_segment_{int(clip_start)}_{int(clip_length)}.wav"
+
+    if not os.path.exists(seg_path):
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-ss", str(clip_start),
+            "-t", str(clip_length),
+            "-i", audio_path,
+            "-ar", "44100", "-ac", "2",
+            seg_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            raise HTTPException(status_code=500, detail="ffmpeg failed to cut segment")
+
+    return {"segment_path": seg_path, "duration": clip_length}
 
 
 @router.post("/api/bpm", response_model=BPMResult)
