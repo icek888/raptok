@@ -7,12 +7,23 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from routers import auth, health, files, video, subtitles, audio, transcription, render, features, projects, admin
 from routers.auth import SESSION_COOKIE, _verify_token, _sessions
+from services import database
 import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RapTok API", version="0.1.0")
+
+# ── Startup: init DB + seed users (guaranteed to run before any request) ──
+@app.on_event("startup")
+def _startup():
+    try:
+        database.init_db()
+        database.seed_users()
+        logger.info("DB initialized + users seeded")
+    except Exception as e:
+        logger.error(f"DB init failed: {e}")
 
 app.add_middleware(
     CORSMiddleware,
