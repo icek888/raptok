@@ -215,15 +215,18 @@ export function VideoPreviewEditor({
       );
     }
 
-    // line_highlight / auto — show full line, highlight active word
+    // line_highlight / auto — show only current + past words, hide future
     const words = activeSub.words || [];
     return (
       <div style={baseStyle}>
         {words.length > 0 ? words.map((w, i) => {
           const isActive = currentTime >= w.start && currentTime <= w.end;
+          const isPast = currentTime > w.end;
+          const isFuture = currentTime < w.start;
+          if (isFuture) return null; // hide future words during pauses
           return (
             <span key={i} style={{
-              color: isActive ? activeCss : primaryCss,
+              color: isActive ? activeCss : isPast ? `${primaryCss}88` : primaryCss,
               transition: 'color 0.1s',
             }}>
               {w.word}{i < words.length - 1 ? ' ' : ''}

@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Type, Mic, Sparkles, Play, Pause, Plus, X, Layout, Check } from 'lucide-react';
+import { Loader2, Type, Mic, Sparkles, Play, Pause, Plus, X } from 'lucide-react';
 import { api } from '../api/client';
-import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle, RenderTemplate } from '../types';
+import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle } from '../types';
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
-import { assToCss, cssToAss } from '../utils/colors';
-import { useTemplates, applyTemplateToStyle } from '../utils/templates';
+
 import { WORD_COLORS } from '../utils/constants';
 
 
@@ -41,11 +40,11 @@ interface Props {
 export function SubtitleEditor({
   lyrics, fragments, subtitles, onSubtitlesChange,
   audioPath, wordTimings, onWordTimingsChange,
-  karaoke, onKaraokeChange,
-  displayMode, onDisplayModeChange,
+  karaoke: _karaoke, onKaraokeChange: _onKaraokeChange,
+  displayMode, onDisplayModeChange: _onDisplayModeChange,
   videoUrl, onAudioStartChange,
-  style, onStyleChange,
-  templateId, onTemplateChange,
+  style, onStyleChange: _onStyleChange,
+  templateId: _templateId, onTemplateChange: _onTemplateChange,
   onApplyStyle: _onApplyStyle, onApplyTemplate: _onApplyTemplate,
   onLyricsChange, autoDetectedText: _autoDetectedText,
   onRangeChange: _onRangeChange, active = true, clipRange,
@@ -57,8 +56,6 @@ export function SubtitleEditor({
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
   const [, setAudioLoading] = useState(false);
   // ── Template popup state (templates loaded via useTemplates hook) ──
-  const { templates } = useTemplates();
-  const [showTemplatePopup, setShowTemplatePopup] = useState(false);
   const [previewThumb, setPreviewThumb] = useState<string | null>(null);
 
   // ── Load first frame thumbnail for template previews ──
@@ -77,15 +74,7 @@ export function SubtitleEditor({
   }, [fragments, videoUrl]);
 
   // ── Apply template (shared utility) ──
-  const applyTemplate = (tmpl: RenderTemplate) => {
-    applyTemplateToStyle(tmpl, onStyleChange, onDisplayModeChange, (id) => onTemplateChange?.(id));
-    setShowTemplatePopup(false);
-  };
-  const [audioStart, setAudioStart] = useState(0);
-  const [audioEnd, setAudioEnd] = useState(0);
-  const [showWordEditor, setShowWordEditor] = useState(false);
-  const [selectedWordIdx, setSelectedWordIdx] = useState(-1);
-
+  
   // ── Full-track word timings (absolute timestamps from whisper) ──
   // Once transcribed, we filter these by audioStart/audioEnd locally
   const [, setFullTrackWords] = useState<WordTiming[]>([]);
@@ -94,8 +83,12 @@ export function SubtitleEditor({
   // ── Audio URL for preview ──
   const audioUrl = audioPath ? `/api/audio-preview/${audioPath.split('/').pop()}` : null;
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [audioStart, setAudioStart] = useState(0);
+  const [audioEnd, setAudioEnd] = useState(0);
   const [playTime, setPlayTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedWordIdx, setSelectedWordIdx] = useState(-1);
+  const [showWordEditor, setShowWordEditor] = useState(false);
 
   // ── Reset audioInfo when audioPath changes (full track → segment) ──
   const prevAudioPath = useRef<string | null>(null);
@@ -321,330 +314,7 @@ export function SubtitleEditor({
   // ── LEFT COLUMN: Style Controls Panel ──
 
   // ── LEFT COLUMN: Style Controls Panel ──
-  const stylePanel = (
-    <div className="space-y-3">
-      {/* Templates button + popup */}
-      {templates.length > 0 && (
-        <>
-          <button
-            onClick={() => setShowTemplatePopup(true)}
-            className={`w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition ${
-              templateId
-                ? 'bg-purple-600/20 border border-purple-500/40 text-purple-300'
-                : 'bg-gradient-to-r from-purple-600/10 to-pink-600/10 border border-purple-500/20 text-gray-300 hover:border-purple-500/40'
-            }`}
-          >
-            <Layout size={14} />
-            {templateId ? `Template: ${templates.find(t => t.id === templateId)?.name || 'Selected'}` : 'Choose Template'}
-          </button>
-
-          {/* Template Popup Modal */}
-          {showTemplatePopup && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-              onClick={() => setShowTemplatePopup(false)}
-            >
-              <div
-                className="bg-[#0f0f17] border border-[#2a2a3a] rounded-2xl p-5 max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
-                onClick={e => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-base font-bold text-white">Render Templates</h3>
-                  <button
-                    onClick={() => setShowTemplatePopup(false)}
-                    className="text-gray-500 hover:text-gray-300"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {templates.map(tmpl => {
-                    const isSelected = templateId === tmpl.id;
-                    // Convert ASS BGR color to CSS RGB for preview
-                    const activeCss = assToCss(tmpl.active_color);
-                    const primaryCss = assToCss(tmpl.primary_color);
-                    // CSS filter per video_mode
-                    let bgFilter = 'none';
-                    let imgClass = 'absolute inset-0 w-full h-full object-cover';
-                    if (tmpl.video_mode === 'crop_fill') {
-                      bgFilter = 'none';
-                      imgClass = 'absolute inset-0 w-full h-full object-cover';
-                    } else if (tmpl.video_mode === 'fit_blur_dark') {
-                      bgFilter = `blur(${Math.round(tmpl.blur_sigma / 3)}px) brightness(${1 - tmpl.dark_overlay * 0.5}) contrast(0.8)`;
-                    } else {
-                      bgFilter = `blur(${Math.round(tmpl.blur_sigma / 3)}px)`;
-                    }
-                    // Scale transform for "floating" look
-                    const scaleStyle = tmpl.scale_factor < 1.0
-                      ? { transform: `scale(${tmpl.scale_factor})` }
-                      : {};
-
-                    return (
-                      <button
-                        key={tmpl.id}
-                        onClick={() => applyTemplate(tmpl)}
-                        className={`relative rounded-xl overflow-hidden border-2 transition group ${
-                          isSelected ? 'border-purple-500' : 'border-[#2a2a3a] hover:border-purple-500/50'
-                        }`}
-                      >
-                        {/* Preview thumbnail (9:16 mini) with real video frame */}
-                        <div
-                          className="relative aspect-[9/16] flex items-center justify-center overflow-hidden"
-                          style={{ background: '#0a0a0f' }}
-                        >
-                          {previewThumb ? (
-                            <>
-                              {tmpl.video_mode === 'crop_fill' ? (
-                                /* crop_fill: full screen zoomed video, no blur */
-                                <img
-                                  src={previewThumb}
-                                  alt=""
-                                  className={imgClass}
-                                  style={{ filter: bgFilter, ...scaleStyle }}
-                                />
-                              ) : (
-                                /* fit_blur / fit_blur_dark: blurred bg + clear centered video */
-                                <>
-                                  <img
-                                    src={previewThumb}
-                                    alt=""
-                                    className="absolute inset-0 w-full h-full object-cover"
-                                    style={{ filter: bgFilter }}
-                                  />
-                                  <img
-                                    src={previewThumb}
-                                    alt=""
-                                    className="absolute inset-0 w-full h-full object-contain"
-                                    style={{ ...scaleStyle, zIndex: 2 }}
-                                  />
-                                </>
-                              )}
-                            </>
-                          ) : (
-                            <div
-                              className="absolute inset-0"
-                              style={{
-                                background: `radial-gradient(circle at 50% 40%, rgba(100,60,200,0.3), transparent 70%)`,
-                                filter: `blur(${Math.round(tmpl.blur_sigma / 3)}px)`,
-                              }}
-                            />
-                          )}
-                          {/* Dark overlay */}
-                          {tmpl.dark_overlay > 0 && (
-                            <div
-                              className="absolute inset-0 bg-black"
-                              style={{ opacity: tmpl.dark_overlay }}
-                            />
-                          )}
-                          {/* Sample text — positioned like the real render */}
-                          <div
-                            className={`relative z-10 text-center px-2 ${tmpl.position === 'bottom' ? 'absolute bottom-4 left-0 right-0' : ''} ${tmpl.position === 'top' ? 'absolute top-4 left-0 right-0' : ''}`}
-                          >
-                            <span
-                              style={{
-                                fontFamily: `'${tmpl.font}', sans-serif`,
-                                fontSize: `${Math.max(10, tmpl.size / 5)}px`,
-                                color: primaryCss,
-                                textShadow: `0 0 ${tmpl.blur_sigma > 30 ? '8px' : '4px'} ${activeCss}, 0 2px 4px rgba(0,0,0,0.8)`,
-                                fontWeight: 'bold',
-                                display: 'block',
-                                lineHeight: '1.2',
-                              }}
-                            >
-                              Где то там
-                            </span>
-                            <span
-                              style={{
-                                fontFamily: `'${tmpl.font}', sans-serif`,
-                                fontSize: `${Math.max(12, tmpl.size / 4)}px`,
-                                color: activeCss,
-                                textShadow: `0 0 6px ${activeCss}, 0 2px 4px rgba(0,0,0,0.8)`,
-                                fontWeight: 'bold',
-                                display: 'block',
-                                lineHeight: '1.2',
-                                marginTop: '2px',
-                              }}
-                            >
-                              ангелы
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Template info */}
-                        <div className="p-2 bg-[#0a0a0f]">
-                          <div className="text-xs font-bold text-white flex items-center gap-1">
-                            {isSelected && <Check size={12} className="text-purple-400" />}
-                            {tmpl.name}
-                          </div>
-                          <div className="text-[9px] text-gray-500 leading-tight mt-0.5">{tmpl.description}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Clear template button */}
-                {templateId && (
-                  <button
-                    onClick={() => {
-                      onTemplateChange?.('');
-                      setShowTemplatePopup(false);
-                    }}
-                    className="mt-4 w-full py-2 text-xs text-gray-500 hover:text-gray-300 border border-[#2a2a3a] rounded-lg"
-                  >
-                    ✕ Clear template — use custom style
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Style Controls — always visible (not collapsible) */}
-      <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-3 space-y-2.5">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium text-pink-300">🎨 Style Controls</span>
-          <span className="text-[10px] text-gray-500 ml-auto">
-            {style.font} · {style.position} · {style.size}px
-          </span>
-        </div>
-
-        {/* Font selector */}
-        <div className="space-y-1">
-          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Font</label>
-          <select
-            value={style.font}
-            onChange={e => onStyleChange({ ...style, font: e.target.value })}
-            className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1.5 text-xs text-gray-200"
-          >
-            {['Arial', 'Montserrat', 'Oswald', 'Russo One', 'Pacifico', 'Press Start 2P'].map(f =>
-              <option key={f} value={f}>{f}</option>
-            )}
-          </select>
-        </div>
-
-        {/* Position */}
-        <div className="space-y-1">
-          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Position</label>
-          <select
-            value={style.position}
-            onChange={e => onStyleChange({ ...style, position: e.target.value as 'bottom' | 'center' | 'top' })}
-            className="w-full bg-[#0a0a0f] border border-[#2a2a3a] rounded px-2 py-1.5 text-xs text-gray-200"
-          >
-            <option value="bottom">↓ Bottom</option>
-            <option value="center">↕ Center</option>
-            <option value="top">↑ Top</option>
-          </select>
-        </div>
-
-        {/* Size */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Size</label>
-            <span className="text-pink-300 font-mono text-xs">{style.size}px</span>
-          </div>
-          <input
-            type="range" min="36" max="120"
-            value={style.size}
-            onChange={e => onStyleChange({ ...style, size: parseInt(e.target.value) })}
-            className="w-full accent-pink-500"
-          />
-        </div>
-
-        {/* Margin */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Margin V</label>
-            <span className="text-pink-300 font-mono text-xs">{style.margin_v}px</span>
-          </div>
-          <input
-            type="range" min="0" max="400"
-            value={style.margin_v}
-            onChange={e => onStyleChange({ ...style, margin_v: parseInt(e.target.value) })}
-            className="w-full accent-pink-500"
-          />
-        </div>
-
-        {/* Outline Width */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label className="text-[10px] text-gray-500 uppercase tracking-wide">Outline</label>
-            <span className="text-pink-300 font-mono text-xs">{style.outline_width}</span>
-          </div>
-          <input
-            type="range" min="0" max="10"
-            value={style.outline_width}
-            onChange={e => onStyleChange({ ...style, outline_width: parseInt(e.target.value) })}
-            className="w-full accent-pink-500"
-          />
-        </div>
-
-        {/* Colors */}
-        <div className="space-y-1">
-          <label className="text-[10px] text-gray-500 uppercase tracking-wide">Colors</label>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              <input
-                type="color"
-                value={assToCss(style.active_color)}
-                onChange={e => onStyleChange({ ...style, active_color: cssToAss(e.target.value) })}
-                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
-                title="Active word color"
-              />
-              <span className="text-[10px] text-gray-500">Active</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <input
-                type="color"
-                value={assToCss(style.primary_color)}
-                onChange={e => onStyleChange({ ...style, primary_color: cssToAss(e.target.value) })}
-                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
-                title="Text color"
-              />
-              <span className="text-[10px] text-gray-500">Text</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <input
-                type="color"
-                value={assToCss(style.outline_color)}
-                onChange={e => onStyleChange({ ...style, outline_color: cssToAss(e.target.value) })}
-                className="w-8 h-8 bg-transparent border border-[#2a2a3a] rounded cursor-pointer"
-                title="Outline color"
-              />
-              <span className="text-[10px] text-gray-500">Outline</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Bold toggle */}
-        <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={style.bold}
-            onChange={e => onStyleChange({ ...style, bold: e.target.checked })}
-            className="w-3.5 h-3.5 accent-pink-500"
-          />
-          Bold
-        </label>
-      </div>
-
-      {/* Display Mode + Karaoke toggle */}
-      <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3 space-y-2.5">
-        {/* Karaoke toggle */}
-        <button
-          onClick={() => onKaraokeChange(!karaoke)}
-          className={`flex items-center gap-1.5 w-full px-3 py-2 rounded-lg text-sm transition ${
-            karaoke ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'
-          }`}
-        >
-          <Sparkles size={14} />
-          Karaoke {karaoke ? 'ON' : 'OFF'}
-        </button>
-      </div>
-    </div>
-  );
+  
 
 
   // ── CENTER COLUMN: Main editing content ──
@@ -1082,13 +752,8 @@ export function SubtitleEditor({
         <audio ref={audioRef} src={audioUrl} preload="metadata" />
       )}
 
-      {/* ── 3-column desktop layout (≥1024px) / single column mobile (<1024px) ── */}
+      {/* ── 2-column layout: timeline (center) + preview (right) ── */}
       <div className="flex flex-col lg:flex-row gap-5">
-        {/* LEFT: Style controls + display mode + karaoke (~260px) */}
-        <div className="lg:w-[260px] lg:shrink-0">
-          {stylePanel}
-        </div>
-
         {/* CENTER: Audio + timeline + transcribe + sync + subtitles (flex-1) */}
         <div className="flex-1 min-w-0">
           {centerContent}

@@ -79,10 +79,7 @@ export function PreviewFrame({
     : style.position === 'center' ? { top: '45%' }
     : { bottom: `${marginPx}px` };
 
-  // Find next words for context (show a few words ahead)
-  const upcomingWords = wordTimings
-    .filter(w => w.start >= videoTime && w.start < videoTime + 3)
-    .slice(0, 5);
+  // No upcoming text — show ONLY the active word, nothing during pauses
 
   return (
     <div className="bg-[#0f0f17] border border-[#1a1a2a] rounded-xl p-3 space-y-2 lg:sticky lg:top-4">
@@ -135,12 +132,6 @@ export function PreviewFrame({
                     >
                       {activeWord.word}
                     </span>
-                    {/* Show next words as preview (dimmed) */}
-                    {upcomingWords.length > 1 && (
-                      <div className="mt-3 text-[10px] opacity-30" style={{ fontFamily, color: textColor }}>
-                        {upcomingWords.slice(1, 4).map(w => w.word).join(' ')}
-                      </div>
-                    )}
                   </div>
                 ) : null;
               }
@@ -187,16 +178,8 @@ export function PreviewFrame({
               ));
             })()
           ) : (
-            /* Idle state — show first subtitle or placeholder */
-            subtitles.length > 0 ? (
-              <div style={{ fontFamily, fontSize: `${fontSize}px`, fontWeight, color: `${textColor}40` }}>
-                {subtitles[0].words?.map(w => w.word).join(' ') || subtitles[0].text}
-              </div>
-            ) : (
-              <div className="text-gray-600 text-xs mt-[40%]">
-                Transcribe to see preview
-              </div>
-            )
+            /* Idle state — no active word, show nothing (clean preview) */
+            <div className="min-h-[40px]" />
           )}
         </div>
       </div>

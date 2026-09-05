@@ -67,10 +67,7 @@ export function AnalysisPanel({
     if (!audio) return;
     const onTime = () => {
       setPlayTime(audio.currentTime);
-      // Loop within range
-      if (rangeEnd > rangeStart && !audio.seeking && audio.currentTime >= rangeEnd) {
-        audio.currentTime = rangeStart;
-      }
+      // No loop on Analysis — free playback, user can click anywhere to seek
     };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
@@ -90,8 +87,8 @@ export function AnalysisPanel({
     if (isPlaying) {
       audio.pause();
     } else {
-      if (audio.currentTime < rangeStart || audio.currentTime >= rangeEnd) {
-        audio.currentTime = rangeStart;
+      if (audio.currentTime < 0) {
+        audio.currentTime = 0;
       }
       audio.play();
     }
