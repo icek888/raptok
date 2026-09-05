@@ -67,11 +67,18 @@ async def upload_audio(file: UploadFile = File(...)):
 
 @router.post("/api/audio-from-youtube")
 async def audio_from_youtube(url: str = Form(...)):
-    """Download audio from YouTube URL and return path + duration."""
+    """Download audio from YouTube URL and return path + duration + title."""
     import subprocess
     job_id = f"audio_{os.urandom(6).hex()}"
     audio_path = TEMP_DIR / f"{job_id}.mp3"
     try:
+        # Get video title for project naming
+        title_result = subprocess.run(
+            ["yt-dlp", "--print", "title", "--no-playlist", url],
+            capture_output=True, text=True, timeout=15
+        )
+        title = title_result.stdout.strip() if title_result.returncode == 0 else None
+
         result = subprocess.run([
             "yt-dlp", "-x", "--audio-format", "mp3",
             "--no-playlist", "-o", str(audio_path),
@@ -91,7 +98,10 @@ async def audio_from_youtube(url: str = Form(...)):
     except Exception:
         duration = 0
 
-    return {"path": str(audio_path), "filename": audio_path.name, "size": os.path.getsize(audio_path), "duration": round(duration, 2)}
+    # Use title as filename for display, fallback to file name
+    display_name = title if title else audio_path.name
+
+    return {"path": str(audio_path), "filename": display_name, "size": os.path.getsize(audio_path), "duration": round(duration, 2)}
 
 
 @router.post("/api/upload/video")

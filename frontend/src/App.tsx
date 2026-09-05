@@ -223,15 +223,22 @@ function App() {
     }
   };
 
-  const handleAudioReady = (path: string, name: string, duration: number) => {
+  const handleAudioReady = async (path: string, name: string, duration: number) => {
     setAudioPath(path);
     setAudioName(name);
     setAudioDuration(duration);
     setStep(1); // Auto-advance to Analysis
 
-    // Fire background pre-transcription immediately (stem split + WhisperX large-v3)
-    // By the time user reaches Lyrics step, result is cached and ready
-    // v3: No background pre-transcription — transcribe only the selected segment on Lyrics step
+    // Auto-create project in DB if not already in one
+    if (!currentProjectId) {
+      try {
+        const project = await api.createProject();
+        setCurrentProjectId(project.id);
+        console.log('Auto-created project for:', name, project.id);
+      } catch (e) {
+        console.error('Auto-create project failed:', e);
+      }
+    }
   };
 
   // ── Step 1: Auto-analysis when audio is loaded (BPM + mood only, NO transcription) ──
@@ -333,6 +340,18 @@ function App() {
               <h1 className="text-xl font-bold gradient-text">RapTok</h1>
               <p className="text-xs text-gray-500">TikTok Content Maker for Rappers</p>
             </div>
+            {audioName && (
+              <div className="ml-4 flex items-center gap-1.5">
+                <span className="text-gray-600 text-sm">·</span>
+                <input
+                  type="text"
+                  value={audioName}
+                  onChange={e => setAudioName(e.target.value)}
+                  className="text-sm text-gray-300 bg-transparent border border-transparent hover:border-white/10 focus:border-purple-500/50 rounded-lg px-2 py-1 outline-none transition w-48"
+                  placeholder="Project name"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">

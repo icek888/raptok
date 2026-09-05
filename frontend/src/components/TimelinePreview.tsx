@@ -92,6 +92,15 @@ export function TimelinePreview({
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
   const viewportEnd = Math.min(duration, viewportStart + viewportSize);
 
+  // Auto-scroll viewport to follow playhead during playback
+  useEffect(() => {
+    if (!isPlaying || currentTime <= 0) return;
+    const margin = viewportSize * 0.15; // 15% margin from edges
+    if (currentTime < viewportStart + margin || currentTime > viewportEnd - margin) {
+      setZoomCenter(currentTime);
+    }
+  }, [currentTime, isPlaying, viewportStart, viewportEnd, viewportSize]);
+
   const timeToX = useCallback((t: number) => {
     if (viewportSize === 0) return 0;
     return ((t - viewportStart) / viewportSize) * 100;
