@@ -86,11 +86,10 @@ export function AnalysisPanel({
     if (!audio) return;
     if (isPlaying) {
       audio.pause();
+      setIsPlaying(false);
     } else {
-      if (audio.currentTime < 0) {
-        audio.currentTime = 0;
-      }
-      audio.play();
+      const p = audio.play();
+      if (p) p.then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
     }
   };
 

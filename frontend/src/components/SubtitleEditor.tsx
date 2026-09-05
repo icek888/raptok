@@ -290,9 +290,10 @@ export function SubtitleEditor({
     onSubtitlesChange(lines);
   };
 
-  const insertWord = (idx: number) => {
-    const prevEnd = idx > 0 ? wordTimings[idx - 1].end : 0;
-    const nextStart = idx < wordTimings.length ? wordTimings[idx].start : prevEnd + 0.5;
+  const insertWord = (idx: number, after = false) => {
+    const insertIdx = after ? idx + 1 : idx;
+    const prevEnd = insertIdx > 0 ? wordTimings[insertIdx - 1].end : 0;
+    const nextStart = insertIdx < wordTimings.length ? wordTimings[insertIdx].start : prevEnd + 0.5;
     const midTime = (prevEnd + nextStart) / 2;
     const dur = Math.max(0.2, (nextStart - prevEnd) / 4);
     const newWord: WordTiming = {
@@ -301,9 +302,11 @@ export function SubtitleEditor({
       end: Math.round((midTime + dur) * 1000) / 1000,
     };
     const updated = [...wordTimings];
-    updated.splice(idx, 0, newWord);
+    updated.splice(insertIdx, 0, newWord);
     onWordTimingsChange(updated);
     regenSubtitles(updated);
+    // Select the new word
+    setSelectedWordIdx(insertIdx);
   };
 
   // ── Active word for karaoke highlight ──
@@ -355,15 +358,23 @@ export function SubtitleEditor({
             lockRange={true}
             focusWordIdx={selectedWordIdx}
             onWordTimingsChange={(timings) => {
-              onWordTimingsChange(timings);
+              // Sort by start time — keeps order consistent when words are dragged
+              const sorted = [...timings].sort((a, b) => a.start - b.start);
+              // Keep the selected word selected after re-sort
+              const selWord = wordTimings[selectedWordIdx];
+              if (selWord) {
+                const newIdx = sorted.findIndex(w => w === selWord || (w.word === selWord.word && Math.abs(w.start - selWord.start) < 0.02));
+                if (newIdx >= 0) setSelectedWordIdx(newIdx);
+              }
+              onWordTimingsChange(sorted);
               // Live regen subtitles from timeline edits too (local, no API needed)
-              if (timings.length === 0) {
+              if (sorted.length === 0) {
                 onSubtitlesChange([]);
                 return;
               }
               const lines: SubtitleLine[] = [];
               let cur: WordTiming[] = [];
-              for (const w of timings) {
+              for (const w of sorted) {
                 if (cur.length > 0) {
                   const gap = w.start - cur[cur.length - 1].end;
                   if (gap > 0.4 || cur.length >= 8) {
@@ -667,10 +678,16 @@ export function SubtitleEditor({
                           <Play size={11} /> Play
                         </button>
                         <button
-                          onClick={() => insertWord(selectedWordIdx)}
+                          onClick={() => insertWord(selectedWordIdx, true)}
                           className="flex items-center justify-center gap-1 px-2 py-1.5 bg-green-600/20 hover:bg-green-500/30 rounded-lg text-xs text-green-300 transition"
                         >
-                          <Plus size={11} /> Insert
+                          <Plus size={11} /> Insert After
+                        </button>
+                        <button
+                          onClick={() => insertWord(selectedWordIdx, false)}
+                          className="flex items-center justify-center gap-1 px-2 py-1.5 bg-green-600/20 hover:bg-green-500/30 rounded-lg text-xs text-green-300 transition"
+                        >
+                          <Plus size={11} /> Insert Before
                         </button>
                         <button
                           onClick={() => {

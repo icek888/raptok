@@ -224,20 +224,30 @@ function App() {
   };
 
   const handleAudioReady = async (path: string, name: string, duration: number) => {
+    // FULL RESET for the new track — no stale state from previous project
     setAudioPath(path);
     setAudioName(name);
     setAudioDuration(duration);
+    setSegmentPath(null);
+    setClipRange(null);
+    setBpmData(null);
+    setTrackAnalysis(null);
+    setLyrics('');
+    setSubtitles([]);
+    setWordTimings([]);
+    setFragments([]);
+    setVideoInfo(null);
+    setAudioStart(0);
+    analysisStarted.current = false; // allow re-analysis for the new track
     setStep(1); // Auto-advance to Analysis
 
-    // Auto-create project in DB if not already in one
-    if (!currentProjectId) {
-      try {
-        const project = await api.createProject();
-        setCurrentProjectId(project.id);
-        console.log('Auto-created project for:', name, project.id);
-      } catch (e) {
-        console.error('Auto-create project failed:', e);
-      }
+    // New track → always a NEW project in DB (clean autosave target)
+    try {
+      const project = await api.createProject();
+      setCurrentProjectId(project.id);
+      console.log('Auto-created project for:', name, project.id);
+    } catch (e) {
+      console.error('Auto-create project failed:', e);
     }
   };
 

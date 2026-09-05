@@ -30,9 +30,9 @@ async def api_cut_segment(
     if not os.path.exists(seg_path):
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-y",
-            "-ss", str(clip_start),
-            "-t", str(clip_length),
             "-i", audio_path,
+            "-ss", str(clip_start),  # accurate seek: -ss AFTER -i
+            "-t", str(clip_length),
             "-ar", "44100", "-ac", "2",
             seg_path,
             stdout=asyncio.subprocess.DEVNULL,
