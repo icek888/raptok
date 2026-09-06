@@ -584,32 +584,17 @@ export function VideoPreviewEditor({
 
           {/* Timeline scrubber with fragments */}
           <div className="w-full max-w-md mt-3">
-            {/* Fragment bar */}
-            {previewFragments.length > 0 && (duration > 0 || previewDuration > 0) && (
-              <div className="flex items-center gap-1 mb-1.5 text-[10px] text-gray-500">
-                <span>Fragments:</span>
-                {previewFragments.map((f: any, i: number) => (
-                  <span key={i} className="px-1.5 py-0.5 rounded text-[9px] font-mono"
-                        style={{
-                          backgroundColor: activeFragment?.id === f.id ? 'rgba(168,85,247,0.3)' : 'rgba(30,30,50,0.5)',
-                          color: activeFragment?.id === f.id ? '#c084fc' : '#666',
-                        }}>
-                    #{i+1} {f.start.toFixed(1)}-{f.end.toFixed(1)}s
-                  </span>
-                ))}
-              </div>
-            )}
             <div
               className="relative h-2 bg-[#0a0a0f] border border-[#1a1a2a] rounded-full cursor-pointer"
               onClick={e => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const pct = (e.clientX - rect.left) / rect.width;
-                seekTo(pct * duration);
+                seekTo(pct * (duration || previewDuration));
               }}
             >
               <div
                 className="absolute top-0 left-0 h-full bg-gradient-to-r from-purple-600 to-pink-500 rounded-full"
-                style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                style={{ width: `${(duration || previewDuration) > 0 ? (currentTime / (duration || previewDuration)) * 100 : 0}%` }}
               />
               {/* Fragment markers */}
               {previewFragments.map((f: any) => (
@@ -624,42 +609,15 @@ export function VideoPreviewEditor({
                   }}
                 />
               ))}
-              {/* Subtitle markers */}
-              {previewSubs.map(s => (
-                <div
-                  key={s.id}
-                  className="absolute top-0 h-full bg-yellow-500/20"
-                  style={{
-                    left: `${(duration || previewDuration) > 0 ? (s.start / (duration || previewDuration)) * 100 : 0}%`,
-                    width: `${(duration || previewDuration) > 0 ? ((s.end - s.start) / (duration || previewDuration)) * 100 : 0}%`,
-                  }}
-                />
-              ))}
             </div>
-            {/* Legend */}
+            {/* Legend — compact, no subtitle markers to reduce clutter */}
             <div className="flex items-center gap-3 mt-1 text-[9px] text-gray-600">
               <span className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-500/30 rounded-sm" /> Fragment</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 bg-yellow-500/20 rounded-sm" /> Subtitle</span>
               <span className="flex items-center gap-1"><span className="w-2 h-2 bg-purple-600 rounded-sm" /> Playhead</span>
+              <span className="text-gray-700">·</span>
+              <span className="font-mono">{currentTime.toFixed(1)}s / {(duration || previewDuration).toFixed(1)}s</span>
             </div>
           </div>
-
-          {/* Active subtitle info */}
-          {activeSub && (
-            <div className="mt-3 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg px-3 py-2 max-w-md w-full">
-              <div className="text-[10px] text-gray-500 mb-0.5">
-                Line #{activeSub.id + 1} · {activeSub.start.toFixed(2)}s → {activeSub.end.toFixed(2)}s
-              </div>
-              <div className="text-sm text-white" style={{ fontFamily: `'${style.font}', sans-serif` }}>
-                {activeSub.text}
-              </div>
-              {activeWord && (
-                <div className="text-xs mt-1" style={{ color: assToCss(style.active_color) }}>
-                  → {activeWord.word} ({activeWord.start.toFixed(2)}s - {activeWord.end.toFixed(2)}s)
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* ── RIGHT: Info & tips ── */}

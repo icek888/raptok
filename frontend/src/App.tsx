@@ -7,7 +7,6 @@ import { FragmentEditor } from './components/FragmentEditor';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
-import { CutToolsPanel } from './components/CutToolsPanel';
 import { BeatEffectsPanel } from './components/BeatEffectsPanel';
 import { AIStylePanel } from './components/AIStylePanel';
 import { Login } from './components/Login';
@@ -342,22 +341,6 @@ function App() {
   const handleApplyStyle = (s: Partial<SubtitleStyle>) => setStyle(prev => ({ ...prev, ...s }));
   const handleApplyTemplate = (tid: string) => setTemplateId(tid);
 
-  const handleAutoCut = (newFrags: any[]) => {
-    if (newFrags?.length) {
-      setFragments(newFrags.map((f: any, i: number) => ({
-        id: i, start: f.start, end: f.end, duration: f.duration
-      })));
-    }
-  };
-
-  const handleSnapToBeats = (newFrags: any[]) => {
-    if (newFrags?.length) {
-      setFragments(newFrags.map((f: any) => ({
-        id: f.id, start: f.start, end: f.end, duration: f.duration
-      })));
-    }
-  };
-
   const handleIntensityChange = (type: 'zoom' | 'flash' | 'shake', value: number) => {
     if (type === 'zoom') setZoomIntensity(value);
     else if (type === 'flash') setFlashIntensity(value);
@@ -538,37 +521,15 @@ function App() {
             />
           )}
 
-          {/* Step 4: Fragments + CutToolsPanel */}
+          {/* Step 4: Fragments — simple random cuts locked to segment duration */}
           {step === 4 && videoInfo && (
-            <div className="flex gap-4">
-              <div className="flex-1 min-w-0">
-                <FragmentEditor
-                  videoInfo={videoInfo}
-                  fragments={fragments}
-                  onFragmentsChange={handleFragmentsChange}
-                  audioPath={segmentPath || audioPath}
-                  beatDivision={beatDivision}
-                  onBeatDivisionChange={setBeatDivision}
-                  onBpmDetected={setBpmData}
-                  bpmData={bpmData}
-                  clipRange={clipRange}
-                  isSegment={!!segmentPath}
-                />
-              </div>
-              <div className="w-72 flex-shrink-0">
-                <CutToolsPanel
-                  bpmData={bpmData}
-                  trackAnalysis={trackAnalysis}
-                  onAutoCut={handleAutoCut}
-                  onSnapToBeats={handleSnapToBeats}
-                  fragments={fragments}
-                  audioPath={segmentPath || audioPath}
-                  videoDuration={videoInfo?.duration || 0}
-                  clipRange={clipRange}
-                  isSegment={!!segmentPath}
-                />
-              </div>
-            </div>
+            <FragmentEditor
+              videoInfo={videoInfo}
+              fragments={fragments}
+              onFragmentsChange={handleFragmentsChange}
+              audioPath={segmentPath || audioPath}
+              segmentDuration={clipRange ? clipRange.end - clipRange.start : (audioDuration || 30)}
+            />
           )}
 
           {/* Step 5: Preview + BeatEffectsPanel (keep mounted) */}
