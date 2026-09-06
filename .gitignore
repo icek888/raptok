@@ -19,6 +19,9 @@ output/
 .DS_Store
 Thumbs.db
 
+# Secrets
+.env
+
 # Node (frontend later)
 node_modules/
 dist/

@@ -184,13 +184,17 @@ def _get_m2e_model():
     global _m2e_model
     if _m2e_model is None:
         import sys
+        import contextlib
         m2e_path = "/usr/local/lib/python3.11/site-packages/music2emo"
         if os.path.isdir(m2e_path):
             if m2e_path not in sys.path:
                 sys.path.insert(0, m2e_path)
-            os.chdir(m2e_path)
-            from music2emo import Music2emo
-            _m2e_model = Music2emo()
+            # Music2Emo may resolve model files relative to CWD — chdir only for
+            # the duration of the load, then restore. Never mutate process CWD
+            # permanently (breaks ffmpeg concat lists, temp paths, uploads).
+            with contextlib.chdir(m2e_path):
+                from music2emo import Music2emo
+                _m2e_model = Music2emo()
             logger.info("Music2Emo model loaded")
     return _m2e_model
 
@@ -343,8 +347,14 @@ def analyze_style(audio_path: str) -> dict:
             bpm, energy_score
         }
     """
-    if audio_path in _style_cache:
-        return _style_cache[audio_path]
+    # Invalidate stale cache if the file changed (re-upload at same path)
+    try:
+        st = os.stat(audio_path)
+        cached = _style_cache.get(audio_path)
+        if cached and cached.get("_mtime") == int(st.st_mtime) and cached.get("_size") == st.st_size:
+            return cached
+    except OSError:
+        pass
     
     flags = get_flags()
     result = {
@@ -404,5 +414,13 @@ def analyze_style(audio_path: str) -> dict:
         f"V={result['valence']:.2f} A={result['arousal']:.2f}"
     )
     
+    # Stamp cache with file identity so stale entries are invalidated on re-upload
+    try:
+        st = os.stat(audio_path)
+        result["_mtime"] = int(st.st_mtime)
+        result["_size"] = st.st_size
+    except OSError:
+        pass
+
     _style_cache[audio_path] = result
     return result

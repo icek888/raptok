@@ -61,165 +61,179 @@ def render_clip(
     
     # Step 2: Extract each fragment — accurate seek (input -ss) + re-encode for frame precision
     frag_paths = []
-    for i, frag in enumerate(fragments):
-        frag_path = work_dir / f"frag_{i:02d}.mp4"
-        # -ss AFTER -i = accurate frame-level seek (slower but precise)
-        # Re-encode (not -c copy) to ensure exact cut points
+    try:
+        for i, frag in enumerate(fragments):
+            frag_path = work_dir / f"frag_{i:02d}.mp4"
+            # -ss AFTER -i = accurate frame-level seek (slower but precise)
+            # Re-encode (not -c copy) to ensure exact cut points
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(video_path),
+                "-ss", str(frag.start),
+                "-t", str(frag.duration),
+                "-c:v", "libx264", "-preset", "fast",
+                "-crf", "18",
+                "-an",
+                "-avoid_negative_ts", "make_zero",
+                str(frag_path)
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(f"Fragment {i} extraction timed out (60s)")
+            if result.returncode != 0:
+                raise RuntimeError(f"Fragment {i} extraction failed: {result.stderr[:300]}")
+            frag_paths.append(str(frag_path))
+        
+        # Step 3: Concatenate fragments — re-encode for seamless stitching + exact duration
+        concat_path = work_dir / "concat.mp4"
+        concat_list = work_dir / "concat_list.txt"
+        concat_list.write_text("\n".join(f"file '{p}'" for p in frag_paths))
+        
         cmd = [
             "ffmpeg", "-y",
-            "-i", str(video_path),
-            "-ss", str(frag.start),
-            "-t", str(frag.duration),
-            "-c:v", "libx264", "-preset", "fast",
-            "-crf", "18",
+            "-f", "concat", "-safe", "0",
+            "-i", str(concat_list),
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-an",
             "-avoid_negative_ts", "make_zero",
-            str(frag_path)
+            str(concat_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            raise RuntimeError(f"Fragment {i} extraction failed: {result.stderr[:300]}")
-        frag_paths.append(str(frag_path))
-    
-    # Step 3: Concatenate fragments — re-encode for seamless stitching + exact duration
-    concat_path = work_dir / "concat.mp4"
-    concat_list = work_dir / "concat_list.txt"
-    concat_list.write_text("\n".join(f"file '{p}'" for p in frag_paths))
-    
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(concat_list),
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-        "-an",
-        "-avoid_negative_ts", "make_zero",
-        str(concat_path)
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-            raise RuntimeError(f"Concat failed: {result.stderr[:300]}")
-    
-    # Step 4: Scale to TikTok format + blur background + burn subtitles
-    output_path = OUTPUT_DIR / f"raptok_{job_id}.mp4"
-    
-    # Template overrides for video rendering
-    video_mode = "fit_blur"
-    blur_sigma = 20
-    dark_overlay = 0.0
-    scale_factor = 1.0
-    if template:
-        video_mode = template.get("video_mode", "fit_blur")
-        blur_sigma = template.get("blur_sigma", 20)
-        dark_overlay = template.get("dark_overlay", 0.0)
-        scale_factor = template.get("scale_factor", 1.0)
-    
-    # ── Beat-synced effects (optional, modular) ──
-    beat_effect_filter = ""
-    if beat_effects_enabled and beats:
         try:
-            from services.beat_effects import build_beat_filter_safe
-            # Get concat duration for beat effect timing
-            concat_dur = sum(f.duration for f in fragments)
-            beat_effect_filter = build_beat_filter_safe(
-                beats, concat_dur,
-                video_w=OUTPUT_WIDTH, video_h=OUTPUT_HEIGHT,
-                energy_curve=energy_curve or [], energy_times=energy_times or [],
-                zoom_intensity=zoom_intensity,
-                flash_intensity=flash_intensity,
-                shake_intensity=shake_intensity,
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Concat timed out (120s)")
+        if result.returncode != 0:
+            raise RuntimeError(f"Concat failed: {result.stderr[:300]}")
+        
+        # Step 4: Scale to TikTok format + blur background + burn subtitles
+        output_path = OUTPUT_DIR / f"raptok_{job_id}.mp4"
+        
+        # Template overrides for video rendering
+        video_mode = "fit_blur"
+        blur_sigma = 20
+        dark_overlay = 0.0
+        scale_factor = 1.0
+        if template:
+            video_mode = template.get("video_mode", "fit_blur")
+            blur_sigma = template.get("blur_sigma", 20)
+            dark_overlay = template.get("dark_overlay", 0.0)
+            scale_factor = template.get("scale_factor", 1.0)
+        
+        # ── Beat-synced effects (optional, modular) ──
+        beat_effect_filter = ""
+        if beat_effects_enabled and beats:
+            try:
+                from services.beat_effects import build_beat_filter_safe
+                # Get concat duration for beat effect timing
+                concat_dur = sum(f.duration for f in fragments)
+                beat_effect_filter = build_beat_filter_safe(
+                    beats, concat_dur,
+                    video_w=OUTPUT_WIDTH, video_h=OUTPUT_HEIGHT,
+                    energy_curve=energy_curve or [], energy_times=energy_times or [],
+                    zoom_intensity=zoom_intensity,
+                    flash_intensity=flash_intensity,
+                    shake_intensity=shake_intensity,
+                )
+                if beat_effect_filter:
+                    logger.info(f"Beat effects applied: {len(beats)} beats, zoom={zoom_intensity}, flash={flash_intensity}, shake={shake_intensity}")
+            except Exception as e:
+                logger.warning(f"Beat effects skipped: {e}")
+                beat_effect_filter = ""
+        
+        # Build scale filter based on video_mode:
+        # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)
+        # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
+        # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
+        #
+        # Beat effects (zoom/flash/shake) are applied AFTER the composite (overlay)
+        # on the final 1080x1920 frame, so effects are visible at full resolution.
+        # If applied before scale-down, zoom 30% becomes invisible on small foreground.
+        
+        # Build the base composite filter (without beat effects)
+        if video_mode == "crop_fill":
+            # Full-screen zoomed video — no blur, no bars
+            scale_filter = (
+                f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
+                f"subtitles={ass_path}[final]"
             )
-            if beat_effect_filter:
-                logger.info(f"Beat effects applied: {len(beats)} beats, zoom={zoom_intensity}, flash={flash_intensity}, shake={shake_intensity}")
-        except Exception as e:
-            logger.warning(f"Beat effects skipped: {e}")
-            beat_effect_filter = ""
-    
-    # Build scale filter based on video_mode:
-    # 1. fit_blur — scale to fit width, center, blur bg fills rest (current default)
-    # 2. crop_fill — zoom to fill 9:16, crop overflow, no black bars, no blur
-    # 3. fit_blur_dark — same as fit_blur but with dark blurred bg behind
-    #
-    # Beat effects (zoom/flash/shake) are applied AFTER the composite (overlay)
-    # on the final 1080x1920 frame, so effects are visible at full resolution.
-    # If applied before scale-down, zoom 30% becomes invisible on small foreground.
-    
-    # Build the base composite filter (without beat effects)
-    if video_mode == "crop_fill":
-        # Full-screen zoomed video — no blur, no bars
-        scale_filter = (
-            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},"
-            f"subtitles={ass_path}[final]"
-        )
-    elif video_mode == "fit_blur_dark":
-        # Clear video scaled down + dark blurred video bg fills entire frame
-        scaled_w = int(OUTPUT_WIDTH * scale_factor)
-        scaled_h = int(OUTPUT_HEIGHT * scale_factor)
-        scale_filter = (
-            # BG: video zoomed to fill 9:16 + blur + dark
-            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
-            f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
-            # FG: clear video scaled to fit within scaled_w x scaled_h box
-            f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
-            # Overlay: dynamic center — ffmpeg calculates (W-w)/2 : (H-h)/2
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
-            # Burn subtitles on top
-            f"[withbg]subtitles={ass_path}[final]"
-        )
-    else:
-        # fit_blur (default) — clear video scaled + blurred bg
-        scaled_w = int(OUTPUT_WIDTH * scale_factor)
-        scaled_h = int(OUTPUT_HEIGHT * scale_factor)
-        scale_filter = (
-            # BG: blurred video fills entire 9:16
-            f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
-            f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
-            # FG: clear video scaled down
-            f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
-            # Overlay: dynamic center
-            f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
-            # Burn subtitles
-            f"[withbg]subtitles={ass_path}[final]"
-        )
-    
-    # Apply beat effects AFTER subtitle burn — on the final 1080x1920 frame.
-    # This way zoom/flash/shake operate at full resolution and are clearly visible.
-    if beat_effect_filter:
-        scale_filter = scale_filter.replace("[final]", "[composed]")
-        scale_filter += f";[composed]{beat_effect_filter}[final]"
+        elif video_mode == "fit_blur_dark":
+            # Clear video scaled down + dark blurred video bg fills entire frame
+            scaled_w = int(OUTPUT_WIDTH * scale_factor)
+            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
+            scale_filter = (
+                # BG: video zoomed to fill 9:16 + blur + dark
+                f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma},"
+                f"eq=brightness=-{dark_overlay * 0.5}:contrast=0.8[bg];"
+                # FG: clear video scaled to fit within scaled_w x scaled_h box
+                f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+                # Overlay: dynamic center — ffmpeg calculates (W-w)/2 : (H-h)/2
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+                # Burn subtitles on top
+                f"[withbg]subtitles={ass_path}[final]"
+            )
+        else:
+            # fit_blur (default) — clear video scaled + blurred bg
+            scaled_w = int(OUTPUT_WIDTH * scale_factor)
+            scaled_h = int(OUTPUT_HEIGHT * scale_factor)
+            scale_filter = (
+                # BG: blurred video fills entire 9:16
+                f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+                f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={blur_sigma}[bg];"
+                # FG: clear video scaled down
+                f"[0:v]scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=decrease[fg];"
+                # Overlay: dynamic center
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[withbg];"
+                # Burn subtitles
+                f"[withbg]subtitles={ass_path}[final]"
+            )
+        
+        # Apply beat effects AFTER subtitle burn — on the final 1080x1920 frame.
+        # This way zoom/flash/shake operate at full resolution and are clearly visible.
+        if beat_effect_filter:
+            scale_filter = scale_filter.replace("[final]", "[composed]")
+            scale_filter += f";[composed]{beat_effect_filter}[final]"
 
-    # Calculate exact total duration from fragments
-    total_duration = sum(f.duration for f in fragments)
-    
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(concat_path),
-        "-i", str(audio_path),
-        "-filter_complex", scale_filter,
-        "-map", "[final]",
-        "-map", "1:a",
-        "-c:v", "libx264",
-        "-preset", FFMPEG_PRESET,
-        "-crf", str(FFMPEG_CRF),
-        "-r", str(OUTPUT_FPS),
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-t", str(total_duration),  # hard cut at exact fragment duration
-        "-shortest",
-        "-movflags", "+faststart",
-        str(output_path)
-    ]
-    logger.info(f"ffmpeg filter_complex: {scale_filter[:500]}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    if result.returncode != 0:
-        logger.error(f"ffmpeg cmd: {' '.join(cmd[:10])}... filter_complex={scale_filter[:300]}")
-        logger.error(f"ffmpeg stderr (last 2000): {result.stderr[-2000:]}")
-    
-    # Clean up work dir
-    shutil.rmtree(work_dir, ignore_errors=True)
-    
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg render failed: {result.stderr[-2000:]}")
-    
-    return str(output_path)
+        # Calculate exact total duration from fragments
+        total_duration = sum(f.duration for f in fragments)
+        
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(concat_path),
+            "-i", str(audio_path),
+            "-filter_complex", scale_filter,
+            "-map", "[final]",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-preset", FFMPEG_PRESET,
+            "-crf", str(FFMPEG_CRF),
+            "-r", str(OUTPUT_FPS),
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", str(total_duration),  # hard cut at exact fragment duration
+            "-shortest",
+            "-movflags", "+faststart",
+            str(output_path)
+        ]
+        logger.info(f"ffmpeg filter_complex: {scale_filter[:500]}")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("ffmpeg render timed out (300s)")
+        if result.returncode != 0:
+            logger.error(f"ffmpeg cmd: {' '.join(cmd[:10])}... filter_complex={scale_filter[:300]}")
+            logger.error(f"ffmpeg stderr (last 2000): {result.stderr[-2000:]}")
+            raise RuntimeError(f"ffmpeg render failed: {result.stderr[-2000:]}")
+        
+        return str(output_path)
+    finally:
+        # Always clean up work dir AND the .ass file (which lives in TEMP_DIR,
+        # a sibling of work_dir — rmtree alone would leak it).
+        shutil.rmtree(work_dir, ignore_errors=True)
+        try:
+            if os.path.exists(ass_path):
+                os.unlink(ass_path)
+        except OSError:
+            pass

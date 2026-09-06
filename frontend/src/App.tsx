@@ -286,6 +286,24 @@ function App() {
     }
   }, [audioPath, step]);
 
+  // ── Re-cut segment on reload: clipRange is persisted but segmentPath is not ──
+  // If the user reloads past the Analysis step, downstream steps need the 0-based
+  // segment. Without this, words (0-based) play over the full track and render
+  // cuts the wrong slice.
+  const reCutAttempted = useRef(false);
+  useEffect(() => {
+    if (reCutAttempted.current) return;
+    if (step >= 2 && clipRange && audioPath && !segmentPath) {
+      reCutAttempted.current = true;
+      api.cutSegment(audioPath, clipRange.start, clipRange.end - clipRange.start)
+        .then((res) => {
+          setSegmentPath(res.segment_path);
+          console.log('Re-cut segment on reload:', res.segment_path, res.duration + 's');
+        })
+        .catch((e) => console.error('Re-cut segment on reload failed:', e));
+    }
+  }, [step, clipRange, audioPath, segmentPath]);
+
   // ── canProceed logic ──
   const canProceed = (s: Step): boolean => {
     switch (s) {
@@ -534,6 +552,7 @@ function App() {
                   onBpmDetected={setBpmData}
                   bpmData={bpmData}
                   clipRange={clipRange}
+                  isSegment={!!segmentPath}
                 />
               </div>
               <div className="w-72 flex-shrink-0">
@@ -546,6 +565,7 @@ function App() {
                   audioPath={segmentPath || audioPath}
                   videoDuration={videoInfo?.duration || 0}
                   clipRange={clipRange}
+                  isSegment={!!segmentPath}
                 />
               </div>
             </div>

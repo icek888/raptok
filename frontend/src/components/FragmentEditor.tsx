@@ -13,6 +13,7 @@ interface Props {
   onBpmDetected: (bpm: BPMResult) => void;
   bpmData: BPMResult | null;
   clipRange: { start: number; end: number } | null;
+  isSegment?: boolean;
 }
 
 const BEAT_DIVISIONS = [
@@ -26,7 +27,7 @@ const BEAT_DIVISIONS = [
 export function FragmentEditor({
   videoInfo, fragments, onFragmentsChange,
   audioPath, beatDivision, onBeatDivisionChange,
-  onBpmDetected, bpmData, clipRange,
+  onBpmDetected, bpmData, clipRange, isSegment = false,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [rerolling, setRerolling] = useState(false);
@@ -55,7 +56,9 @@ export function FragmentEditor({
     if (!audioPath) return;
     setBeatSyncing(true);
     try {
-      const clipStart = clipRange?.start ?? 0;
+      // If audioPath is a pre-cut SEGMENT (0-based), clip_start must be 0
+      // (double-offset bug → 0 fragments otherwise).
+      const clipStart = isSegment ? 0 : (clipRange?.start ?? 0);
       const clipLength = clipRange ? clipRange.end - clipRange.start : 0;
       const result = await api.beatSync(audioPath, videoInfo.duration, 7, beatDivision, 2, 5, clipStart, clipLength);
       onBpmDetected({ bpm: result.bpm, beats: result.beats, downbeats: [], duration: result.total_duration });

@@ -4,6 +4,7 @@ import time
 import asyncio
 import logging
 import os
+import hashlib
 import subprocess
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
@@ -107,8 +108,8 @@ async def api_transcribe_full_stream(
     language: str = Form("en"),
     lyrics: str = Form(""),
     model_size: str = Form(""),
-    clip_start: float = Form(0.0),
-    clip_length: float = Form(0.0),
+    clip_start: float = Form(0.0, ge=0),
+    clip_length: float = Form(0.0, ge=0),
 ):
     """Transcribe with SSE progress updates.
     
@@ -126,7 +127,7 @@ async def api_transcribe_full_stream(
             segment_offset = 0.0  # time offset for word timestamps
             if clip_length > 0 and clip_start >= 0:
                 yield f"data: {json.dumps({'step': 'cut', 'label': f'Cutting segment ({clip_length:.0f}s)...', 'progress': 3, 'elapsed': elapsed()})}\n\n"
-                seg_path = os.path.join(TEMP_DIR, f"seg_{hash(audio_path)}_{clip_start}_{clip_length}.wav")
+                seg_path = os.path.join(TEMP_DIR, f"seg_{hashlib.md5(audio_path.encode()).hexdigest()[:12]}_{clip_start}_{clip_length}.wav")
                 if not os.path.exists(seg_path):
                     proc = await asyncio.create_subprocess_exec(
                         "ffmpeg", "-y", "-ss", str(clip_start), "-t", str(clip_length),

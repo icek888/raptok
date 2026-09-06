@@ -1,5 +1,6 @@
 """Render + preview router."""
 import os
+import asyncio
 import logging
 import tempfile
 import subprocess
@@ -63,14 +64,17 @@ async def api_render(request: Request, req: RenderRequest):
             total_dur = sum(f.duration for f in fragments)
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
                 tmp_audio = tmp.name
-            subprocess.run([
+            await asyncio.to_thread(subprocess.run, [
                 "ffmpeg", "-y", "-i", req.audio_path,
                 "-ss", str(req.audio_start), "-t", str(total_dur + 1),
                 "-ar", "44100", "-ac", "2", tmp_audio
             ], capture_output=True, timeout=120)
             audio_path = tmp_audio
 
-        output_path = render_clip(
+        # render_clip is CPU/ffmpeg-heavy — run in a thread so it doesn't block
+        # the event loop (health checks, SSE, other users' requests).
+        output_path = await asyncio.to_thread(
+            render_clip,
             video_path=req.video_path,
             fragments=fragments,
             audio_path=audio_path,
@@ -153,7 +157,7 @@ async def prepare_preview(req: PreparePreviewRequest):
         frag_files = []
         for i, frag in enumerate(fragments):
             frag_file = TEMP_DIR / f"{job_id}_frag_{i}.mp4"
-            r = subprocess.run([
+            r = await asyncio.to_thread(subprocess.run, [
                 "ffmpeg", "-y",
                 "-i", str(req.video_path),
                 "-ss", str(frag.start),
@@ -175,7 +179,7 @@ async def prepare_preview(req: PreparePreviewRequest):
         concat_file.close()
 
         preview_video = TEMP_DIR / f"{job_id}.mp4"
-        result = subprocess.run([
+        result = await asyncio.to_thread(subprocess.run, [
             "ffmpeg", "-y", "-f", "concat", "-safe", "0",
             "-i", concat_file.name,
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
@@ -196,7 +200,7 @@ async def prepare_preview(req: PreparePreviewRequest):
         if req.audio_path:
             audio_start = req.audio_start or 0.0
             preview_audio = TEMP_DIR / f"{job_id}_audio.mp3"
-            result = subprocess.run([
+            result = await asyncio.to_thread(subprocess.run, [
                 "ffmpeg", "-y",
                 "-ss", str(audio_start), "-t", str(total_video_dur),
                 "-i", req.audio_path,

@@ -24,6 +24,36 @@ def _startup():
         logger.info("DB initialized + users seeded")
     except Exception as e:
         logger.error(f"DB init failed: {e}")
+    _cleanup_stale_tmp()
+
+
+def _cleanup_stale_tmp(max_age_hours: int = 24):
+    """Delete temp files (segments, previews, .ass, vocals) older than max_age.
+
+    tmp/ grows unbounded otherwise (segments + previews + .ass accumulate with
+    zero cleanup). Runs once at startup; cheap enough to be safe.
+    """
+    try:
+        from config import TEMP_DIR
+        import os as _os
+        cutoff = time.time() - max_age_hours * 3600
+        removed = 0
+        for entry in TEMP_DIR.iterdir():
+            if not entry.is_file():
+                continue
+            # Never touch the SQLite DB or session store
+            if entry.name in ("raptok.db", ".sessions.json"):
+                continue
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    entry.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        if removed:
+            logger.info(f"Cleanup: removed {removed} stale temp files (> {max_age_hours}h)")
+    except Exception as e:
+        logger.warning(f"Cleanup skipped: {e}")
 
 app.add_middleware(
     CORSMiddleware,

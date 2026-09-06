@@ -17,11 +17,12 @@ interface CutToolsPanelProps {
   audioPath: string | null;
   videoDuration: number;
   clipRange: { start: number; end: number } | null;
+  isSegment?: boolean;
 }
 
 type Status = 'idle' | 'loading' | 'done' | 'error';
 
-export function CutToolsPanel({ bpmData, trackAnalysis: _trackAnalysis, onAutoCut, onSnapToBeats, fragments, audioPath, videoDuration, clipRange }: CutToolsPanelProps) {
+export function CutToolsPanel({ bpmData, trackAnalysis: _trackAnalysis, onAutoCut, onSnapToBeats, fragments, audioPath, videoDuration, clipRange, isSegment = false }: CutToolsPanelProps) {
   const [autoCutStatus, setAutoCutStatus] = useState<Status>('idle');
   const [snapStatus, setSnapStatus] = useState<Status>('idle');
   const [count, setCount] = useState(7);
@@ -38,7 +39,10 @@ export function CutToolsPanel({ bpmData, trackAnalysis: _trackAnalysis, onAutoCu
     setAutoCutStatus('loading');
     try {
       // ── v3: use autoCutByAudio with clipRange — audio defines clip length ──
-      const clipStart = clipRange?.start ?? 0;
+      // If audioPath is a pre-cut SEGMENT (0-based), clip_start must be 0 —
+      // otherwise the backend filters beats in an absolute range that doesn't
+      // exist inside the segment (double-offset bug → 0 fragments).
+      const clipStart = isSegment ? 0 : (clipRange?.start ?? 0);
       const clipLength = clipRange ? clipRange.end - clipRange.start : 0;
       
       const result = await api.autoCutByAudio(

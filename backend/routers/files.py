@@ -1,7 +1,7 @@
 """File serving + upload router."""
 import os
 import shutil
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from fastapi.responses import FileResponse
 from config import TEMP_DIR, OUTPUT_DIR
 
@@ -9,12 +9,31 @@ router = APIRouter()
 
 
 @router.get("/api/download/{filename}")
-async def download_file(filename: str):
-    """Download a rendered clip."""
-    filepath = OUTPUT_DIR / filename
-    if not filepath.exists():
+async def download_file(filename: str, request: Request):
+    """Download a rendered clip (ownership-checked)."""
+    name = os.path.basename(filename)
+    if not name or name.startswith(".") or name != filename:
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(filepath), media_type="video/mp4", filename=filename)
+    filepath = OUTPUT_DIR / name
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Ownership check: render must belong to the current user (or be admin)
+    try:
+        from routers.auth import SESSION_COOKIE, _verify_token
+        from services import database
+        token = request.cookies.get(SESSION_COOKIE)
+        session = _verify_token(token) if token else None
+        if session:
+            user = database.get_user(session["username"])
+            if user and user.get("role") == "admin":
+                return FileResponse(str(filepath), media_type="video/mp4", filename=name)
+            row = database.get_render_by_filename(name)
+            if row and row.get("user") == session["username"]:
+                return FileResponse(str(filepath), media_type="video/mp4", filename=name)
+    except Exception:
+        pass
+    raise HTTPException(status_code=403, detail="Not authorized to download this file")
 
 
 @router.get("/api/video/{filename}")
@@ -30,21 +49,31 @@ async def serve_video(filename: str):
 
 @router.get("/api/thumbnail/{filename}")
 async def get_thumbnail_file(filename: str):
-    """Serve a thumbnail image."""
-    filepath = TEMP_DIR / filename
-    if not filepath.exists():
+    """Serve a thumbnail image (strict basename + image whitelist)."""
+    name = os.path.basename(filename)
+    if not name or name.startswith(".") or name != filename:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    if not name.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    filepath = TEMP_DIR / name
+    if not filepath.is_file():
         raise HTTPException(status_code=404, detail="Thumbnail not found")
     return FileResponse(str(filepath), media_type="image/jpeg")
 
 
 @router.get("/api/audio-preview/{filename}")
 async def audio_preview(filename: str):
-    """Serve audio file for preview playback."""
-    for f in TEMP_DIR.iterdir():
-        if filename in f.name:
-            media = "audio/wav" if f.suffix == ".wav" else "audio/mpeg"
-            return FileResponse(str(f), media_type=media)
-    raise HTTPException(status_code=404, detail="Audio file not found")
+    """Serve audio file for preview playback (strict basename match)."""
+    name = os.path.basename(filename)
+    if not name or name.startswith(".") or name != filename:
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    if not name.lower().endswith((".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg")):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    filepath = TEMP_DIR / name
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    media = "audio/wav" if filepath.suffix.lower() == ".wav" else "audio/mpeg"
+    return FileResponse(str(filepath), media_type=media)
 
 
 @router.post("/api/upload/audio")
@@ -68,18 +97,19 @@ async def upload_audio(file: UploadFile = File(...)):
 @router.post("/api/audio-from-youtube")
 async def audio_from_youtube(url: str = Form(...)):
     """Download audio from YouTube URL and return path + duration + title."""
+    import asyncio
     import subprocess
     job_id = f"audio_{os.urandom(6).hex()}"
     audio_path = TEMP_DIR / f"{job_id}.mp3"
     try:
         # Get video title for project naming
-        title_result = subprocess.run(
+        title_result = await asyncio.to_thread(subprocess.run,
             ["yt-dlp", "--print", "title", "--no-playlist", url],
             capture_output=True, text=True, timeout=15
         )
         title = title_result.stdout.strip() if title_result.returncode == 0 else None
 
-        result = subprocess.run([
+        result = await asyncio.to_thread(subprocess.run, [
             "yt-dlp", "-x", "--audio-format", "mp3",
             "--no-playlist", "-o", str(audio_path),
             url
@@ -118,7 +148,8 @@ async def upload_video(file: UploadFile = File(...)):
 
     # Probe metadata with ffprobe
     try:
-        probe = subprocess.run([
+        import asyncio
+        probe = await asyncio.to_thread(subprocess.run, [
             "ffprobe", "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", str(video_path)
         ], capture_output=True, text=True, timeout=30)

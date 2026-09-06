@@ -39,8 +39,11 @@ async def separate_vocals(
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found: {audio_path}")
     
-    # Hash for unique output name
-    file_hash = hashlib.md5(audio_path.encode()).hexdigest()[:12]
+    # Cache key = path + mtime + size. A re-uploaded/replaced track at the same
+    # path must NOT return the previous track's vocals (stale-cache poisoning).
+    st = os.stat(audio_path)
+    cache_key = f"{audio_path}:{int(st.st_mtime)}:{st.st_size}"
+    file_hash = hashlib.md5(cache_key.encode()).hexdigest()[:12]
     output_path = os.path.join(TEMP_DIR, f"vocals_{file_hash}.wav")
     
     if os.path.exists(output_path):

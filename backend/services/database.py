@@ -8,6 +8,9 @@ import sqlite3
 import json
 import time
 import logging
+import hashlib
+import hmac
+import os
 from pathlib import Path
 from typing import Optional
 from config import TEMP_DIR
@@ -15,6 +18,31 @@ from config import TEMP_DIR
 logger = logging.getLogger(__name__)
 
 DB_PATH = TEMP_DIR / "raptok.db"
+
+# ── Password hashing (pbkdf2_hmac) ──
+_PBKDF2_ITERATIONS = 200_000
+
+
+def hash_password(password: str) -> str:
+    """Hash a password with pbkdf2_hmac + per-user salt. Returns 'pbkdf2$iter$salt$hash'."""
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Verify a password against a stored hash. Falls back to plaintext compare
+    for legacy (pre-hash) rows, and transparently upgrades them on match."""
+    if not stored or not stored.startswith("pbkdf2$"):
+        # Legacy plaintext — compare directly (will be upgraded on next write)
+        return hmac.compare_digest(password, stored or "")
+    try:
+        _, iters, salt_hex, hash_hex = stored.split("$")
+        salt = bytes.fromhex(salt_hex)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, int(iters))
+        return hmac.compare_digest(dk.hex(), hash_hex)
+    except Exception:
+        return False
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -301,6 +329,16 @@ def list_renders(user: str, limit: int = 30) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_render_by_filename(filename: str) -> dict | None:
+    """Look up a render record by its output filename (for ownership checks)."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT * FROM renders WHERE filename = ?", (filename,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def delete_render(user: str, render_id: str) -> bool:
     """Delete a render record."""
     conn = _get_db()
@@ -466,7 +504,7 @@ PLAN_LIMITS = {
 
 
 def seed_users():
-    """Seed default admin users if not exist."""
+    """Seed default admin users if not exist (passwords stored hashed)."""
     conn = _get_db()
     now = time.time()
     for username, password, role, plan in _SEED_USERS:
@@ -474,8 +512,16 @@ def seed_users():
         if not row:
             conn.execute(
                 "INSERT INTO users (username, password, role, plan, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
-                (username, password, role, plan, now, now)
+                (username, hash_password(password), role, plan, now, now)
             )
+        else:
+            # Upgrade legacy plaintext seed password to hash
+            stored = row["password"]
+            if not str(stored).startswith("pbkdf2$"):
+                conn.execute(
+                    "UPDATE users SET password = ?, updated_at = ? WHERE username = ?",
+                    (hash_password(password), now, username)
+                )
     conn.commit()
     conn.close()
 
@@ -492,11 +538,25 @@ def verify_user(username: str, password: str) -> dict | None:
     """Verify credentials and return user if valid + active."""
     conn = _get_db()
     row = conn.execute(
-        "SELECT * FROM users WHERE username = ? AND password = ? AND is_active = 1",
-        (username, password)
+        "SELECT * FROM users WHERE username = ? AND is_active = 1",
+        (username,)
     ).fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    user = dict(row)
+    if not verify_password(password, user.get("password", "")):
+        return None
+    # Transparently upgrade legacy plaintext password to hash on successful login
+    if not str(user.get("password", "")).startswith("pbkdf2$"):
+        conn = _get_db()
+        conn.execute(
+            "UPDATE users SET password = ?, updated_at = ? WHERE username = ?",
+            (hash_password(password), time.time(), username)
+        )
+        conn.commit()
+        conn.close()
+    return user
 
 
 def list_all_users() -> list[dict]:
@@ -519,7 +579,7 @@ def create_user_db(username: str, password: str, role: str = "user", plan: str =
         return {}
     conn.execute(
         "INSERT INTO users (username, password, role, plan, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
-        (username, password, role, plan, now, now)
+        (username, hash_password(password), role, plan, now, now)
     )
     conn.commit()
     row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
@@ -541,7 +601,8 @@ def update_user(username: str, data: dict) -> dict | None:
     for key in ("password", "role", "plan", "is_active"):
         if key in data:
             fields.append(f"{key} = ?")
-            values.append(data[key])
+            # Hash password on write
+            values.append(hash_password(data[key]) if key == "password" else data[key])
 
     if fields:
         fields.append("updated_at = ?")

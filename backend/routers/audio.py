@@ -14,8 +14,8 @@ router = APIRouter()
 @router.post("/api/cut-segment")
 async def api_cut_segment(
     audio_path: str = Form(...),
-    clip_start: float = Form(...),
-    clip_length: float = Form(...),
+    clip_start: float = Form(..., ge=0),
+    clip_length: float = Form(..., gt=0),
 ):
     """Cut a segment from audio file. Returns path to the cut segment WAV.
     Used after Analysis step — Lyrics works only with this segment.
@@ -41,6 +41,9 @@ async def api_cut_segment(
         await proc.wait()
         if proc.returncode != 0:
             raise HTTPException(status_code=500, detail="ffmpeg failed to cut segment")
+        # Guard against a zero-byte / broken segment being cached forever
+        if not os.path.exists(seg_path) or os.path.getsize(seg_path) == 0:
+            raise HTTPException(status_code=500, detail="ffmpeg produced an empty segment")
 
     return {"segment_path": seg_path, "duration": clip_length}
 

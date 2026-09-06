@@ -21,7 +21,13 @@ router = APIRouter()
 # ── Config ──
 SESSION_COOKIE = "raptok_session"
 SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days
-SECRET_KEY = os.environ.get("RAPTOK_SECRET", "raptok-secret-2026-change-me")
+SECRET_KEY = os.environ.get("RAPTOK_SECRET")
+if not SECRET_KEY:
+    raise RuntimeError(
+        "RAPTOK_SECRET is not set. Set it in .env (see docker-compose.yml). "
+        "Refusing to start with a predictable session-signing key."
+    )
+assert SECRET_KEY is not None  # narrowed by the guard above
 
 # ── Session store: {session_token: {username, ip, expires}} ──
 SESSIONS_FILE = TEMP_DIR / ".sessions.json"
