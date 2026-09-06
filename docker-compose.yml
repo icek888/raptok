@@ -21,6 +21,9 @@ services:
   raptok-backend:
     build: ./backend
     restart: always
+    # entrypoint.sh updates yt-dlp to latest on every start (avoids 403 Forbidden
+    # from YouTube's changing player clients) — no full image rebuild needed.
+    command: /app/entrypoint.sh
     volumes:
       - ./backend:/app
       - ./output:/output
