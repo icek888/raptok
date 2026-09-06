@@ -29,6 +29,8 @@ services:
       - ./output:/output
       - ./tmp:/tmp/raptok
       - ./frontend/public/fonts:/usr/share/fonts/truetype/custom:ro
+      - pip-cache:/root/.cache/pip
+      - whisperx-store:/usr/local/lib/python3.11/site-packages
     environment:
       - RAPTOK_TEMP_DIR=/tmp/raptok
       - RAPTOK_OUTPUT_DIR=/output
@@ -45,3 +47,7 @@ services:
 networks:
   traefik:
     external: true
+
+volumes:
+  pip-cache:
+  whisperx-store:

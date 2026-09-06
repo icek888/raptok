@@ -21,6 +21,7 @@ interface Props {
   onPlayPause: () => void;
   lockRange?: boolean;
   focusWordIdx?: number; // zoom to this word when it changes
+  onWordSelect?: (idx: number) => void; // click word to select in editor
 }
 
 const MAX_ZOOM = 80; // 80x zoom — very detailed word editing
@@ -32,6 +33,7 @@ export function TimelinePreview({
   onSeek, currentTime, isPlaying, onPlayPause,
   lockRange = false,
   focusWordIdx = -1,
+  onWordSelect,
 }: Props) {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [zoomCenter, setZoomCenter] = useState(0);
@@ -42,6 +44,7 @@ export function TimelinePreview({
   const [dragWordIdx, setDragWordIdx] = useState(-1);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartData, setDragStartData] = useState({ start: 0, end: 0, wordStart: 0, wordEnd: 0, zoomCenter: 0 });
+  const [dropTargetIdx, setDropTargetIdx] = useState(-1); // word being hovered for swap
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; wordIdx: number } | null>(null);
   const [editingWordIdx, setEditingWordIdx] = useState(-1);
@@ -79,14 +82,13 @@ export function TimelinePreview({
     if (focusWordIdx < 0 || focusWordIdx >= wordTimings.length) return;
     const w = wordTimings[focusWordIdx];
     if (!w) return;
-    const wordCenter = (w.start + w.end) / 2;
+    const wordCenter = (w.start + w.end) / 2 + audioStart; // absolute position
     const wordDuration = Math.max(0.5, w.end - w.start);
-    // Zoom so the word takes ~1/4 of viewport (comfortable for editing)
     const targetZoom = Math.min(MAX_ZOOM, Math.max(4, duration / (wordDuration * 4)));
     setZoomLevel(targetZoom);
     setZoomCenter(wordCenter);
-    setAutoZoom(false); // manual zoom mode
-  }, [focusWordIdx, wordTimings, duration]);
+    setAutoZoom(false);
+  }, [focusWordIdx]); // NOT dependent on wordTimings — only fires on explicit selection
 
   const viewportSize = duration / zoomLevel;
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
@@ -183,12 +185,11 @@ export function TimelinePreview({
         const newCenter = Math.max(viewportSize / 2, Math.min(duration - viewportSize / 2, dragStartData.zoomCenter - deltaT));
         setZoomCenter(newCenter);
       } else if (dragMode === 'word-move' && dragWordIdx >= 0 && onWordTimingsChange) {
-        const wordW = dragStartData.wordEnd - dragStartData.wordStart;
-        let ns = Math.max(0, dragStartData.wordStart + deltaT);
-        ns = Math.min(ns, duration - wordW);
-        const updated = [...wordTimings];
-        updated[dragWordIdx] = { ...updated[dragWordIdx], start: ns, end: ns + wordW };
-        onWordTimingsChange(updated);
+        // Track drop target for swap visualization
+        const hoverTime = xToTime(e.clientX);
+        const hoverIdx = wordTimings.findIndex(w => hoverTime >= w.start + audioStart && hoverTime <= w.end + audioStart);
+        setDropTargetIdx(hoverIdx >= 0 && hoverIdx !== dragWordIdx ? hoverIdx : -1);
+        // Don't commit on mousemove — wait for mouseup to swap or move
       } else if (dragMode === 'word-resize-left' && dragWordIdx >= 0 && onWordTimingsChange) {
         let ns = Math.max(0, Math.min(dragStartData.wordStart + deltaT, dragStartData.wordEnd - 0.05));
         const updated = [...wordTimings];
@@ -203,9 +204,24 @@ export function TimelinePreview({
       }
     };
     const handleUp = () => {
+      // Word-move: SWAP if dropped on another word, else free-move
+      if (dragMode === 'word-move' && dragWordIdx >= 0 && onWordTimingsChange) {
+        if (dropTargetIdx >= 0 && dropTargetIdx !== dragWordIdx) {
+          // SWAP timing between dragged word and drop target
+          const dragged = wordTimings[dragWordIdx];
+          const target = wordTimings[dropTargetIdx];
+          const updated = [...wordTimings];
+          updated[dragWordIdx] = { ...dragged, start: target.start, end: target.end };
+          updated[dropTargetIdx] = { ...target, start: dragged.start, end: dragged.end };
+          onWordTimingsChange(updated);
+        } else {
+          // No drop target — word stays in place (use resize handles to change timing)
+        }
+      }
       setDragging(false);
       setDragMode('none');
       setDragWordIdx(-1);
+      setDropTargetIdx(-1);
     };
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
@@ -213,7 +229,7 @@ export function TimelinePreview({
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [dragging, dragMode, dragStartX, dragStartData, dragWordIdx, duration, audioStart, audioEnd, onRangeChange, onWordTimingsChange, wordTimings, xToTime, viewportSize]);
+  }, [dragging, dragMode, dragStartX, dragStartData, dragWordIdx, dropTargetIdx, duration, audioStart, audioEnd, onRangeChange, onWordTimingsChange, wordTimings, xToTime, viewportSize]);
 
   // Context menu actions
   const splitWord = (idx: number) => {
@@ -469,6 +485,7 @@ export function TimelinePreview({
           const isActive = i === activeWordIdx;
           const isEditing = i === editingWordIdx;
           const isDragging = i === dragWordIdx && dragging;
+          const isDropTarget = i === dropTargetIdx && dragging;
 
           // Font size adapts to zoom and word width
           const fontSize = width > 15 ? '16px' : width > 8 ? '14px' : width > 4 ? '12px' : '10px';
@@ -477,7 +494,7 @@ export function TimelinePreview({
           return (
             <div
               key={i}
-              className={`absolute rounded-md flex items-center justify-center cursor-move transition-opacity ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-80' : ''}`}
+              className={`absolute rounded-md flex items-center justify-center cursor-move transition-opacity ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-50' : ''} ${isDropTarget ? 'ring-2 ring-yellow-400/80 border-dashed z-30' : ''}`}
               style={{
                 top: `${wordTop}px`,
                 bottom: `${wordBottom}px`,
@@ -489,6 +506,7 @@ export function TimelinePreview({
                 minHeight: '28px',
               }}
               onMouseDown={(e) => handleWordMouseDown(e, i, 'move')}
+              onClick={(e) => { if (!dragging && onWordSelect) { e.stopPropagation(); onWordSelect(i); } }}
               onDoubleClick={(e) => { e.stopPropagation(); editWord(i); }}
               title={`${w.word} | ${w.start.toFixed(2)}s - ${w.end.toFixed(2)}s`}
             >

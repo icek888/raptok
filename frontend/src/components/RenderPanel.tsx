@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle, Layout } from 'lucide-react';
+import { Sparkles, Loader2, Download, CheckCircle2, AlertCircle, Layout, Shuffle } from 'lucide-react';
 import { api } from '../api/client';
 import type { Fragment, VideoInfo, SubtitleLine, SubtitleStyle, RenderResult, WordTiming } from '../types';
 import { useTemplates } from '../utils/templates';
@@ -15,13 +15,15 @@ interface Props {
   karaoke: boolean;
   displayMode: string;
   templateId?: string;
+  onTemplateChange?: (id: string) => void;
   beatEffects?: { enabled: boolean; beats: number[]; zoom: number; flash: number; shake: number; energyCurve?: number[]; energyTimes?: number[] };
 }
 
-export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, wordTimings, style, karaoke, displayMode, templateId, beatEffects }: Props) {
+export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subtitles, wordTimings, style, karaoke, displayMode, templateId, onTemplateChange, beatEffects }: Props) {
   const [rendering, setRendering] = useState(false);
   const [result, setResult] = useState<RenderResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shuffleFragments, setShuffleFragments] = useState(false);
   const { templates } = useTemplates();
 
   const canRender = videoInfo && fragments.length >= 3 && audioPath && subtitles.length > 0;
@@ -34,7 +36,10 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
     setError(null);
     setResult(null);
     try {
-      const res = await api.render(videoInfo!.local_path, fragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '', wordTimings, beatEffects);
+      const renderFragments = shuffleFragments
+        ? [...fragments].sort(() => Math.random() - 0.5)
+        : fragments;
+      const res = await api.render(videoInfo!.local_path, renderFragments, audioPath!, subtitles, style, karaoke, audioStart, displayMode, templateId || '', wordTimings, beatEffects);
       setResult(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Render failed');
@@ -53,6 +58,31 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
         </div>
       </div>
 
+      {/* Template selector — 3 cards */}
+      {templates.length > 0 && (
+        <div>
+          <div className="text-sm text-gray-400 mb-2">Choose a template:</div>
+          <div className="grid grid-cols-3 gap-3">
+            {templates.map(tpl => (
+              <button
+                key={tpl.id}
+                onClick={() => onTemplateChange?.(tpl.id)}
+                className={`p-3 rounded-xl border-2 transition text-left ${
+                  templateId === tpl.id
+                    ? 'border-purple-500 bg-purple-500/10'
+                    : 'border-[#1a1a2a] bg-[#0f0f17] hover:border-purple-500/30'
+                }`}
+              >
+                <div className="text-sm font-bold mb-1" style={{ color: tpl.active_color }}>
+                  {tpl.name}
+                </div>
+                <div className="text-[10px] text-gray-500">{tpl.description}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Selected template indicator */}
       {selectedTemplate && (
         <div className="bg-purple-950/30 border border-purple-500/30 rounded-lg p-3 flex items-center gap-2">
@@ -64,13 +94,22 @@ export function RenderPanel({ videoInfo, fragments, audioPath, audioStart, subti
         </div>
       )}
 
+      {/* Shuffle fragments option */}
+      <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+        <input type="checkbox" checked={shuffleFragments}
+          onChange={e => setShuffleFragments(e.target.checked)}
+          className="accent-purple-500 w-4 h-4" />
+        <Shuffle size={14} className="text-purple-400" />
+        Shuffle fragments — randomize video clip order
+      </label>
+
       {/* Checklist */}
       <div className="space-y-2">
         <ChecklistItem checked={!!videoInfo} label="Video loaded" />
         <ChecklistItem checked={fragments.length >= 3} label={`${fragments.length} fragments selected (min 3)`} />
         <ChecklistItem checked={!!audioPath} label="Audio track uploaded" />
         <ChecklistItem checked={subtitles.length > 0} label="Subtitles generated" />
-        <ChecklistItem checked={karaoke} label={`Karaoke mode · ${displayMode === 'word_by_word' ? 'word-by-word' : 'line + highlight'}`} />
+        <ChecklistItem checked={karaoke} label={`Karaoke mode · ${displayMode === 'word_by_word' ? 'word-by-word' : 'single word'}`} />
       </div>
 
       <button

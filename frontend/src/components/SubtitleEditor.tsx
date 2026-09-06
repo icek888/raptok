@@ -375,6 +375,7 @@ export function SubtitleEditor({
             onRangeChange={undefined}
             lockRange={true}
             focusWordIdx={selectedWordIdx}
+            onWordSelect={(idx) => setSelectedWordIdx(idx)}
             onWordTimingsChange={(timings) => {
               // Sort by start time — keeps order consistent when words are dragged
               const sorted = [...timings].sort((a, b) => a.start - b.start);

@@ -72,10 +72,9 @@ def align_lyrics_to_timings(
             for i in range(len(user_words))
         ]
 
-    # Strategy 2: DTW alignment (no count ratio bail-out)
-    # DTW handles different counts well — it inserts/deletes as needed
+    # Strategy 2: DTW alignment — preserves ALL user words
     aligned = _dtw_align(user_words, user_norm, whisper_words, whisper_norm)
-    if aligned and len(aligned) >= len(user_words) * 0.3:
+    if aligned and len(aligned) >= len(user_words) * 0.5:
         return aligned
 
     # Strategy 3: Position-aware matching
@@ -100,60 +99,86 @@ def _dtw_align(
     whisper_norm: list[str],
 ) -> list[WordTiming] | None:
     """DTW alignment between user words and whisper words.
-    
-    No count ratio bail-out — DTW naturally handles different counts
-    by inserting/deleting words. This works well for lyrics vs transcription
-    where whisper may detect extra words (ad-libs, repeats) or miss some.
+
+    Uses explicit back-pointer matrix so NO user word is ever dropped.
+    Unmatched user words get interpolated timing from neighbors.
     """
     n = len(user_words)
     m = len(whisper_words)
     if n == 0 or m == 0:
         return None
-
-    # No bail-out based on count ratio — DTW handles it
-    # But cap matrix size for performance (200x300 max)
     if n > 300 or m > 500:
-        # Too large — use sampling
         return None
 
     INF = float('inf')
     cost = [[INF] * (m + 1) for _ in range(n + 1)]
+    back: list[list[str | None]] = [[None] * (m + 1) for _ in range(n + 1)]
     cost[0][0] = 0
 
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            match_cost = 0 if user_norm[i-1] == whisper_norm[j-1] else 1
-            cost[i][j] = match_cost + min(
-                cost[i-1][j],
-                cost[i][j-1],
-                cost[i-1][j-1],
-            )
+            match_cost = 0 if user_norm[i - 1] == whisper_norm[j - 1] else 1
+            diag = cost[i - 1][j - 1] + match_cost
+            up = cost[i - 1][j] + 1
+            left = cost[i][j - 1] + 1
+            best = min(diag, up, left)
+            cost[i][j] = best
+            if best == diag:
+                back[i][j] = 'diag'
+            elif best == up:
+                back[i][j] = 'up'
+            else:
+                back[i][j] = 'left'
 
+    # Also fill first row (j=0): all user words unmatched
+    for i in range(1, n + 1):
+        cost[i][0] = cost[i - 1][0] + 1
+        back[i][0] = 'up'
+
+    # Backtrack — ALL user words preserved
+    pairs: list[tuple[int, int]] = []  # (user_idx, whisper_idx or -1)
     i, j = n, m
-    pairs = []
-    while i > 0 and j > 0:
-        match_cost = 0 if user_norm[i-1] == whisper_norm[j-1] else 1
-        if cost[i-1][j-1] + match_cost == cost[i][j]:
-            pairs.append((i-1, j-1))
+    while i > 0:
+        direction = back[i][j]
+        if direction == 'diag':
+            pairs.append((i - 1, j - 1))
             i -= 1
             j -= 1
-        elif cost[i-1][j] + 1 == cost[i][j]:
+        elif direction == 'up':
+            pairs.append((i - 1, -1))  # unmatched user word
             i -= 1
-        else:
+        else:  # left
             j -= 1
 
     pairs.reverse()
-    if not pairs:
-        return None
 
-    result = []
+    # Build result — interpolate timing for unmatched words
+    result: list[WordTiming] = []
     for u_idx, w_idx in pairs:
-        result.append(WordTiming(
-            word=user_words[u_idx],
-            start=round(whisper_words[w_idx]["start"], 3),
-            end=round(whisper_words[w_idx]["end"], 3),
-        ))
-    return result
+        if w_idx >= 0 and w_idx < m:
+            result.append(WordTiming(
+                word=user_words[u_idx],
+                start=round(whisper_words[w_idx]["start"], 3),
+                end=round(whisper_words[w_idx]["end"], 3),
+            ))
+        else:
+            # Interpolate from neighbors
+            prev_end = result[-1].end if result else 0.0
+            # Find next matched word's start
+            next_start = prev_end + 0.3
+            for k in range(len(pairs)):
+                if pairs[k][0] > u_idx and pairs[k][1] >= 0:
+                    next_start = whisper_words[pairs[k][1]]["start"]
+                    break
+            mid = (prev_end + next_start) / 2
+            if mid <= prev_end:
+                mid = prev_end + 0.15
+            result.append(WordTiming(
+                word=user_words[u_idx],
+                start=round(prev_end, 3),
+                end=round(min(mid + 0.3, next_start if next_start > mid else mid + 0.3), 3),
+            ))
+    return result if result else None
 
 
 def _position_align(

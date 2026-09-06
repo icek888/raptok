@@ -584,6 +584,7 @@ function App() {
               karaoke={karaoke}
               displayMode={displayMode}
               templateId={templateId}
+              onTemplateChange={setTemplateId}
               beatEffects={beatEffectsOn ? {
                 enabled: true,
                 beats: bpmData?.beats || [],

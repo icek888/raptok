@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, Activity, Palette, Gauge, Zap, Play, Pause, Scissors } from 'lucide-react';
+import { Loader2, Activity, Palette, Gauge, Zap, Play, Pause, Scissors, ZoomIn, ZoomOut } from 'lucide-react';
 import type { BPMResult, TrackAnalysis, AudioInfo } from '../types';
 import { api } from '../api/client';
 
@@ -24,6 +24,9 @@ export function AnalysisPanel({
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(0);
   const [dragging, setDragging] = useState<null | 'start' | 'end' | 'move'>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);  // 1 = full track, 20 = detailed
+  const [zoomCenter, setZoomCenter] = useState(0); // center of viewport in seconds
+  const [buffered, setBuffered] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const waveformRef = useRef<HTMLDivElement>(null);
 
@@ -61,25 +64,27 @@ export function AnalysisPanel({
     }
   }, [clipRange]);
 
-  // Audio playback tracking
+  // Audio playback tracking + buffering
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const onTime = () => {
       setPlayTime(audio.currentTime);
-      // No loop on Analysis — free playback, user can click anywhere to seek
     };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
+    const onCanPlayThrough = () => setBuffered(true);
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
+    audio.addEventListener('canplaythrough', onCanPlayThrough);
     return () => {
       audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('canplaythrough', onCanPlayThrough);
     };
-  }, [audioUrl, rangeStart, rangeEnd]);
+  }, [audioUrl]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -101,22 +106,29 @@ export function AnalysisPanel({
     }
   };
 
-  // Waveform interaction
+  // Waveform interaction — viewport-relative for zoom
   const duration = audioInfo?.duration || audioDuration || 0;
   const rmsValues = audioInfo?.rms_values || [];
 
-  const timeToPct = (t: number) => (duration > 0 ? (t / duration) * 100 : 0);
-  const pctToTime = (pct: number) => (pct / 100) * duration;
+  const viewportSize = duration / zoomLevel;
+  const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
+  const viewportEnd = Math.min(duration, viewportStart + viewportSize);
+
+  const timeToX = (t: number) => viewportSize === 0 ? 0 : ((t - viewportStart) / viewportSize) * 100;
+  const xToTime = (clientX: number) => {
+    const rect = waveformRef.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return viewportStart + pct * viewportSize;
+  };
 
   const handleWaveformMouseDown = (e: React.MouseEvent, mode: 'start' | 'end' | 'move' | 'seek') => {
     e.preventDefault();
     e.stopPropagation();
     if (mode === 'seek') {
-      const rect = waveformRef.current?.getBoundingClientRect();
-      if (rect) {
-        const pct = ((e.clientX - rect.left) / rect.width) * 100;
-        seekTo(Math.max(0, Math.min(duration, pctToTime(pct))));
-      }
+      const t = Math.max(0, Math.min(duration, xToTime(e.clientX)));
+      seekTo(t);
+      setZoomCenter(t); // center viewport on click position
       return;
     }
     setDragging(mode);
@@ -125,10 +137,7 @@ export function AnalysisPanel({
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: MouseEvent) => {
-      const rect = waveformRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
-      const t = pctToTime(pct);
+      const t = Math.max(0, Math.min(duration, xToTime(e.clientX)));
 
       if (dragging === 'start') {
         const newStart = Math.min(t, rangeEnd - 1);
@@ -264,7 +273,7 @@ export function AnalysisPanel({
             </span>
           </div>
 
-          {/* Play button */}
+          {/* Play button + buffer indicator */}
           <div className="flex items-center gap-3">
             <button
               onClick={togglePlay}
@@ -273,6 +282,28 @@ export function AnalysisPanel({
               {isPlaying ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white ml-0.5" />}
             </button>
             <span className="text-gray-400 text-sm font-mono">{fmtTime(playTime)}</span>
+            {!buffered && <span className="text-xs text-yellow-500 animate-pulse">buffering...</span>}
+            {buffered && <span className="text-xs text-green-500">● ready</span>}
+          </div>
+
+          {/* Zoom controls */}
+          <div className="flex items-center gap-2">
+            <ZoomOut size={14} className="text-gray-500" />
+            <input
+              type="range" min={1} max={20} step={0.5}
+              value={zoomLevel}
+              onChange={e => { setZoomLevel(parseFloat(e.target.value)); setZoomCenter(playTime); }}
+              className="flex-1 accent-purple-500"
+              title={`Zoom: ${zoomLevel.toFixed(1)}x`}
+            />
+            <ZoomIn size={14} className="text-gray-500" />
+            <span className="text-xs text-gray-500 font-mono w-10">{zoomLevel.toFixed(1)}x</span>
+            <button
+              onClick={() => { setZoomLevel(1); setZoomCenter(0); }}
+              className="text-[10px] text-gray-400 px-2 py-0.5 hover:bg-[#2a2a3a] rounded transition"
+            >
+              1:1
+            </button>
           </div>
 
           {/* Waveform + range markers */}
@@ -281,10 +312,12 @@ export function AnalysisPanel({
             className="relative h-24 bg-black/40 rounded-lg cursor-pointer overflow-hidden select-none"
             onMouseDown={(e) => handleWaveformMouseDown(e, 'seek')}
           >
-            {/* RMS waveform bars */}
+            {/* RMS waveform bars — filtered by viewport */}
             <div className="absolute inset-0 flex items-end gap-px px-1">
               {rmsValues.length > 0 ? (
                 rmsValues.map((v, i) => {
+                  const barTime = (i / rmsValues.length) * duration;
+                  if (barTime < viewportStart || barTime > viewportEnd) return null;
                   return (
                     <div
                       key={i}
@@ -298,7 +331,6 @@ export function AnalysisPanel({
                   );
                 })
               ) : (
-                // Fallback: energy curve
                 trackAnalysis?.energy_curve?.slice(0, 100).map((v, i) => (
                   <div
                     key={i}
@@ -313,15 +345,15 @@ export function AnalysisPanel({
             <div
               className="absolute top-0 bottom-0 bg-purple-500/20 border-x-2 border-purple-400"
               style={{
-                left: `${timeToPct(rangeStart)}%`,
-                width: `${timeToPct(rangeEnd - rangeStart)}%`,
+                left: `${timeToX(rangeStart)}%`,
+                width: `${Math.max(0.5, timeToX(rangeEnd) - timeToX(rangeStart))}%`,
               }}
             />
 
             {/* Start handle */}
             <div
               className="absolute top-0 bottom-0 w-2 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300"
-              style={{ left: `calc(${timeToPct(rangeStart)}% - 4px)` }}
+              style={{ left: `calc(${timeToX(rangeStart)}% - 4px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'start')}
             >
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
@@ -330,7 +362,7 @@ export function AnalysisPanel({
             {/* End handle */}
             <div
               className="absolute top-0 bottom-0 w-2 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300"
-              style={{ left: `calc(${timeToPct(rangeEnd)}% - 4px)` }}
+              style={{ left: `calc(${timeToX(rangeEnd)}% - 4px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'end')}
             >
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
@@ -340,8 +372,8 @@ export function AnalysisPanel({
             <div
               className="absolute top-0 bottom-0 cursor-grab z-5"
               style={{
-                left: `${timeToPct(rangeStart)}%`,
-                width: `${timeToPct(rangeEnd - rangeStart)}%`,
+                left: `${timeToX(rangeStart)}%`,
+                width: `${Math.max(0.5, timeToX(rangeEnd) - timeToX(rangeStart))}%`,
               }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'move')}
             />
@@ -349,9 +381,17 @@ export function AnalysisPanel({
             {/* Playhead */}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 z-20 pointer-events-none"
-              style={{ left: `${timeToPct(playTime)}%` }}
+              style={{ left: `${timeToX(playTime)}%` }}
             />
           </div>
+
+          {/* Viewport indicator (when zoomed) */}
+          {zoomLevel > 1.1 && (
+            <div className="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
+              <span>{fmtTime(viewportStart)} → {fmtTime(viewportEnd)}</span>
+              <span className="text-gray-600">(zoomed {zoomLevel.toFixed(1)}x)</span>
+            </div>
+          )}
 
           {/* Range info */}
           <div className="flex items-center justify-between text-sm">
@@ -366,7 +406,7 @@ export function AnalysisPanel({
       )}
 
       {/* Audio element */}
-      {audioUrl && <audio ref={audioRef} src={audioUrl} preload="metadata" />}
+      {audioUrl && <audio ref={audioRef} src={audioUrl} preload="auto" />}
     </div>
   );
 }
