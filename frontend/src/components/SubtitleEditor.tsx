@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, Type, Mic, Sparkles, Play, Pause, Plus, X } from 'lucide-react';
+import { Loader2, Type, Mic, Sparkles, Play, Pause, Plus, X, Eraser } from 'lucide-react';
 import { api } from '../api/client';
 import type { Fragment, SubtitleLine, WordTiming, AudioInfo, SubtitleStyle } from '../types';
 import { TimelinePreview } from './TimelinePreview';
 import { PreviewFrame } from './PreviewFrame';
 
 import { WORD_COLORS } from '../utils/constants';
+
+// Strip punctuation from a word for karaoke mode (keeps letters, digits, hyphens inside words)
+const stripPunctuation = (w: WordTiming): WordTiming => ({
+  ...w,
+  word: w.word.replace(/[^\p{L}\p{N}\s'-]/gu, '').trim() || w.word,
+});
 
 
 
@@ -89,6 +95,7 @@ export function SubtitleEditor({
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedWordIdx, setSelectedWordIdx] = useState(-1);
   const [showWordEditor, setShowWordEditor] = useState(false);
+  const [punctuationStripped, setPunctuationStripped] = useState(false);
 
   // ── Reset audioInfo when audioPath changes (full track → segment) ──
   const prevAudioPath = useRef<string | null>(null);
@@ -327,6 +334,25 @@ export function SubtitleEditor({
     setSelectedWordIdx(insertIdx);
   };
 
+  // ── Strip punctuation from all words (for karaoke mode) ──
+  const handleStripPunctuation = () => {
+    if (wordTimings.length === 0) return;
+    const stripped = wordTimings.map(stripPunctuation);
+    onWordTimingsChange(stripped);
+    regenSubtitles(stripped);
+    setPunctuationStripped(true);
+  };
+
+  // ── Reset punctuation flag when new words come from transcription/alignment ──
+  const prevWordCount = useRef(0);
+  useEffect(() => {
+    // If word count changed significantly (re-transcribe/align), reset strip flag
+    if (Math.abs(wordTimings.length - prevWordCount.current) > 2) {
+      setPunctuationStripped(false);
+    }
+    prevWordCount.current = wordTimings.length;
+  }, [wordTimings.length]);
+
   // ── Active word for karaoke highlight ──
   const activeWordIndex = wordTimings.findIndex(w =>
     playTime - audioStart >= w.start && playTime - audioStart <= w.end
@@ -526,6 +552,21 @@ export function SubtitleEditor({
           {wordSplitLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           Word Split {wordTimings.length > 0 ? '(synced)' : '(even)'}
         </button>
+        {wordTimings.length > 0 && (
+          <button
+            onClick={handleStripPunctuation}
+            disabled={punctuationStripped}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition ${
+              punctuationStripped
+                ? 'bg-green-600/20 text-green-300 cursor-default'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+            title="Remove punctuation from words for cleaner karaoke display"
+          >
+            <Eraser size={14} />
+            {punctuationStripped ? '✓ No Punctuation' : 'Strip Punctuation'}
+          </button>
+        )}
         {wordTimings.length > 0 && (
           <button
             onClick={() => setShowWordEditor(!showWordEditor)}

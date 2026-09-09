@@ -40,11 +40,13 @@ export function TimelinePreview({
   const [autoZoom, setAutoZoom] = useState(true);
 
   const [dragging, setDragging] = useState(false);
-  const [dragMode, setDragMode] = useState<'range-start' | 'range-end' | 'range-move' | 'word-move' | 'word-resize-left' | 'word-resize-right' | 'pan' | 'none'>('none');
+  const [dragMode, setDragMode] = useState<'range-start' | 'range-end' | 'range-move' | 'word-swap' | 'word-nudge' | 'word-resize-left' | 'word-resize-right' | 'pan' | 'none'>('none');
   const [dragWordIdx, setDragWordIdx] = useState(-1);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartData, setDragStartData] = useState({ start: 0, end: 0, wordStart: 0, wordEnd: 0, zoomCenter: 0 });
   const [dropTargetIdx, setDropTargetIdx] = useState(-1); // word being hovered for swap
+  const [dragGhostX, setDragGhostX] = useState(0); // ghost word follows cursor
+  const [dragGhostY, setDragGhostY] = useState(0); // vertical offset for lifted effect
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; wordIdx: number } | null>(null);
   const [editingWordIdx, setEditingWordIdx] = useState(-1);
@@ -77,9 +79,9 @@ export function TimelinePreview({
     }
   }, [audioStart, audioEnd, autoZoom, duration, zoomLevel, lockRange]);
 
-  // Zoom to selected word (from edit panel below)
+  // Zoom to selected word (from edit panel below) — ONLY when autoZoom is on
   useEffect(() => {
-    if (focusWordIdx < 0 || focusWordIdx >= wordTimings.length) return;
+    if (!autoZoom || focusWordIdx < 0 || focusWordIdx >= wordTimings.length) return;
     const w = wordTimings[focusWordIdx];
     if (!w) return;
     const wordCenter = (w.start + w.end) / 2 + audioStart; // absolute position
@@ -87,21 +89,20 @@ export function TimelinePreview({
     const targetZoom = Math.min(MAX_ZOOM, Math.max(4, duration / (wordDuration * 4)));
     setZoomLevel(targetZoom);
     setZoomCenter(wordCenter);
-    setAutoZoom(false);
   }, [focusWordIdx]); // NOT dependent on wordTimings — only fires on explicit selection
 
   const viewportSize = duration / zoomLevel;
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
   const viewportEnd = Math.min(duration, viewportStart + viewportSize);
 
-  // Auto-scroll viewport to follow playhead during playback
+  // Auto-follow: when playing + zoomed, keep playhead in view — ONLY when autoZoom is on
   useEffect(() => {
-    if (!isPlaying || currentTime <= 0) return;
+    if (!autoZoom || !isPlaying || currentTime <= 0) return;
     const margin = viewportSize * 0.15; // 15% margin from edges
     if (currentTime < viewportStart + margin || currentTime > viewportEnd - margin) {
       setZoomCenter(currentTime);
     }
-  }, [currentTime, isPlaying, viewportStart, viewportEnd, viewportSize]);
+  }, [currentTime, isPlaying, viewportStart, viewportEnd, viewportSize, autoZoom]);
 
   const timeToX = useCallback((t: number) => {
     if (viewportSize === 0) return 0;
@@ -144,7 +145,7 @@ export function TimelinePreview({
     setDragStartData({ start: audioStart, end: audioEnd, wordStart: 0, wordEnd: 0, zoomCenter });
   };
 
-  const handleWordMouseDown = (e: React.MouseEvent, idx: number, mode: 'move' | 'resize-left' | 'resize-right') => {
+  const handleWordMouseDown = (e: React.MouseEvent, idx: number, mode: 'swap' | 'nudge' | 'resize-left' | 'resize-right') => {
     if (!onWordTimingsChange) return;
     e.stopPropagation();
     e.preventDefault();
@@ -154,6 +155,14 @@ export function TimelinePreview({
     setDragWordIdx(idx);
     setDragStartX(e.clientX);
     setDragStartData({ start: audioStart, end: audioEnd, wordStart: w.start, wordEnd: w.end, zoomCenter });
+    // Initialize ghost position at word location (swap mode only)
+    if (mode === 'swap') {
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (rect) {
+        setDragGhostX(e.clientX - rect.left);
+        setDragGhostY(e.clientY - rect.top);
+      }
+    }
   };
 
   // Pan (middle-click or space+drag to scroll timeline)
@@ -184,12 +193,31 @@ export function TimelinePreview({
       } else if (dragMode === 'pan') {
         const newCenter = Math.max(viewportSize / 2, Math.min(duration - viewportSize / 2, dragStartData.zoomCenter - deltaT));
         setZoomCenter(newCenter);
-      } else if (dragMode === 'word-move' && dragWordIdx >= 0 && onWordTimingsChange) {
+      } else if (dragMode === 'word-swap' && dragWordIdx >= 0 && onWordTimingsChange) {
+        // Update ghost position — follows cursor
+        const rect = timelineRef.current?.getBoundingClientRect();
+        if (rect) {
+          setDragGhostX(e.clientX - rect.left);
+          setDragGhostY(e.clientY - rect.top);
+        }
         // Track drop target for swap visualization
         const hoverTime = xToTime(e.clientX);
         const hoverIdx = wordTimings.findIndex(w => hoverTime >= w.start + audioStart && hoverTime <= w.end + audioStart);
         setDropTargetIdx(hoverIdx >= 0 && hoverIdx !== dragWordIdx ? hoverIdx : -1);
-        // Don't commit on mousemove — wait for mouseup to swap or move
+      } else if (dragMode === 'word-nudge' && dragWordIdx >= 0 && onWordTimingsChange) {
+        // Nudge: shift word start+end together, preserve duration, prevent overlap
+        const wordDur = dragStartData.wordEnd - dragStartData.wordStart;
+        let newStart = dragStartData.wordStart + deltaT;
+        // Clamp: don't overlap neighbors
+        const prevWord = dragWordIdx > 0 ? wordTimings[dragWordIdx - 1] : null;
+        const nextWord = dragWordIdx < wordTimings.length - 1 ? wordTimings[dragWordIdx + 1] : null;
+        if (prevWord && newStart < prevWord.end + 0.01) newStart = prevWord.end + 0.01;
+        if (nextWord && newStart + wordDur > nextWord.start - 0.01) newStart = nextWord.start - 0.01 - wordDur;
+        // Clamp to segment bounds
+        newStart = Math.max(0, Math.min(newStart, duration - wordDur));
+        const updated = [...wordTimings];
+        updated[dragWordIdx] = { ...updated[dragWordIdx], start: newStart, end: newStart + wordDur };
+        onWordTimingsChange(updated);
       } else if (dragMode === 'word-resize-left' && dragWordIdx >= 0 && onWordTimingsChange) {
         let ns = Math.max(0, Math.min(dragStartData.wordStart + deltaT, dragStartData.wordEnd - 0.05));
         const updated = [...wordTimings];
@@ -204,8 +232,8 @@ export function TimelinePreview({
       }
     };
     const handleUp = () => {
-      // Word-move: SWAP if dropped on another word, else free-move
-      if (dragMode === 'word-move' && dragWordIdx >= 0 && onWordTimingsChange) {
+      // Word-swap: SWAP if dropped on another word, else word stays
+      if (dragMode === 'word-swap' && dragWordIdx >= 0 && onWordTimingsChange) {
         if (dropTargetIdx >= 0 && dropTargetIdx !== dragWordIdx) {
           // SWAP timing between dragged word and drop target
           const dragged = wordTimings[dragWordIdx];
@@ -329,9 +357,9 @@ export function TimelinePreview({
   const scrollPct = duration > 0 ? (viewportStart / duration) * 100 : 0;
   const scrollWidthPct = duration > 0 ? (viewportSize / duration) * 100 : 100;
 
-  // Word block height — more space when zoomed in
-  const wordTop = zoomLevel > 5 ? 6 : 4;
-  const wordBottom = 2;
+  // Word block — centered vertically: ~25% margin top/bottom, ~50% height
+  const wordTop = Math.round(timelineHeight * 0.25);
+  const wordBottom = Math.round(timelineHeight * 0.25);
 
   return (
     <div className="space-y-2">
@@ -373,10 +401,15 @@ export function TimelinePreview({
           </button>
           <button
             onClick={() => setAutoZoom(!autoZoom)}
-            className={`px-2 py-1 text-[10px] rounded transition ${autoZoom ? 'text-purple-400 bg-purple-500/10' : 'text-gray-500 hover:bg-[#2a2a3a]'}`}
-            title="Auto-zoom to selection"
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] rounded transition ${
+              autoZoom
+                ? 'text-purple-400 bg-purple-500/15 border border-purple-500/30'
+                : 'text-gray-500 hover:bg-[#2a2a3a] border border-transparent'
+            }`}
+            title="Auto-zoom: автоматически зумировать к выделению и следить за playhead"
           >
-            Auto
+            <span className={`w-2 h-2 rounded-sm ${autoZoom ? 'bg-purple-400' : 'bg-gray-600'}`} />
+            Auto-zoom
           </button>
         </div>
       </div>
@@ -484,7 +517,7 @@ export function TimelinePreview({
           const color = WORD_COLORS[i % WORD_COLORS.length];
           const isActive = i === activeWordIdx;
           const isEditing = i === editingWordIdx;
-          const isDragging = i === dragWordIdx && dragging;
+          const isDragging = i === dragWordIdx && dragging && dragMode === 'word-swap';
           const isDropTarget = i === dropTargetIdx && dragging;
 
           // Font size adapts to zoom and word width
@@ -494,7 +527,7 @@ export function TimelinePreview({
           return (
             <div
               key={i}
-              className={`absolute rounded-md flex items-center justify-center cursor-move transition-opacity ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-50' : ''} ${isDropTarget ? 'ring-2 ring-yellow-400/80 border-dashed z-30' : ''}`}
+              className={`absolute rounded-md flex items-center justify-center transition-[opacity,transform] duration-200 ${isActive ? 'ring-2 ring-yellow-400 z-30' : 'z-20'} ${isDragging ? 'opacity-30 scale-95' : ''} ${isDropTarget ? 'ring-2 ring-yellow-400/80 border-2 border-dashed z-30 scale-105 animate-pulse' : ''}`}
               style={{
                 top: `${wordTop}px`,
                 bottom: `${wordBottom}px`,
@@ -503,24 +536,42 @@ export function TimelinePreview({
                 backgroundColor: `${color}40`,
                 border: `1px solid ${color}`,
                 borderBottom: `3px solid ${color}`,
-                minHeight: '28px',
+                minHeight: '16px',
+                transform: isDragging ? 'scale(0.95)' : undefined,
               }}
-              onMouseDown={(e) => handleWordMouseDown(e, i, 'move')}
               onClick={(e) => { if (!dragging && onWordSelect) { e.stopPropagation(); onWordSelect(i); } }}
               onDoubleClick={(e) => { e.stopPropagation(); editWord(i); }}
               title={`${w.word} | ${w.start.toFixed(2)}s - ${w.end.toFixed(2)}s`}
             >
+              {/* Swap handle — top strip (grab here to swap with another word) */}
+              {onWordTimingsChange && (
+                <div
+                  className="absolute top-0 left-0 right-0 h-[6px] cursor-grab active:cursor-grabbing rounded-t-md hover:bg-white/30 transition-colors"
+                  onMouseDown={(e) => handleWordMouseDown(e, i, 'swap')}
+                  title="Drag from here to swap with another word"
+                >
+                  <div className="h-[2px] bg-white/20 mx-2 mt-[2px] rounded-full" />
+                </div>
+              )}
+              {/* Nudge body — center area (drag left/right to shift word position) */}
+              {onWordTimingsChange && (
+                <div
+                  className="absolute top-[6px] bottom-0 left-1.5 right-1.5 cursor-ew-resize"
+                  onMouseDown={(e) => handleWordMouseDown(e, i, 'nudge')}
+                  title="Drag left/right to nudge word position"
+                />
+              )}
               {/* Left resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-l-md"
+                  className="absolute left-0 top-[6px] bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-l-md z-10"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-left')}
                 />
               )}
               {/* Right resize handle */}
               {onWordTimingsChange && (
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-r-md"
+                  className="absolute right-0 top-[6px] bottom-0 w-1.5 cursor-ew-resize hover:bg-white/40 rounded-r-md z-10"
                   onMouseDown={(e) => handleWordMouseDown(e, i, 'resize-right')}
                 />
               )}
@@ -548,6 +599,33 @@ export function TimelinePreview({
             </div>
           );
         })}
+
+        {/* Drag ghost — floating word preview that follows cursor during swap drag */}
+        {dragging && dragMode === 'word-swap' && dragWordIdx >= 0 && wordTimings[dragWordIdx] && (
+          <div
+            className="absolute z-50 pointer-events-none rounded-md flex items-center justify-center shadow-2xl"
+            style={{
+              left: `${dragGhostX}px`,
+              top: `${dragGhostY - 14}px`,
+              transform: 'translate(-50%, -50%)',
+              backgroundColor: `${WORD_COLORS[dragWordIdx % WORD_COLORS.length]}cc`,
+              border: `2px solid ${WORD_COLORS[dragWordIdx % WORD_COLORS.length]}`,
+              padding: '2px 12px',
+              minHeight: '28px',
+              minWidth: '40px',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.6), 0 0 12px rgba(168,85,247,0.4)',
+            }}
+          >
+            <span className="text-white text-sm font-bold whitespace-nowrap select-none">
+              {wordTimings[dragWordIdx].word}
+            </span>
+            {dropTargetIdx >= 0 && (
+              <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[9px] text-yellow-400 font-bold whitespace-nowrap">
+                ⇄ swap
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Playhead */}
         <div className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-40 pointer-events-none" style={{ left: `${playheadPct}%` }} />

@@ -153,31 +153,75 @@ def _dtw_align(
     pairs.reverse()
 
     # Build result — interpolate timing for unmatched words
+    # Group consecutive unmatched words and distribute evenly between neighbors
     result: list[WordTiming] = []
+
+    # First pass: collect groups of consecutive matched/unmatched
+    groups: list[tuple[bool, list[tuple[int, int]]]] = []  # (is_matched, [(u_idx, w_idx)...])
+    current_group: list[tuple[int, int]] = []
+    current_matched: bool | None = None
+
     for u_idx, w_idx in pairs:
-        if w_idx >= 0 and w_idx < m:
-            result.append(WordTiming(
-                word=user_words[u_idx],
-                start=round(whisper_words[w_idx]["start"], 3),
-                end=round(whisper_words[w_idx]["end"], 3),
-            ))
+        is_matched = w_idx >= 0
+        if current_matched is None:
+            current_matched = is_matched
+            current_group = [(u_idx, w_idx)]
+        elif is_matched == current_matched:
+            current_group.append((u_idx, w_idx))
         else:
-            # Interpolate from neighbors
+            groups.append((current_matched, current_group))
+            current_matched = is_matched
+            current_group = [(u_idx, w_idx)]
+    if current_group:
+        groups.append((current_matched if current_matched is not None else False, current_group))
+
+    # Second pass: build result with proper interpolation
+    for group_idx, (is_matched, group) in enumerate(groups):
+        if is_matched:
+            # Matched words — use whisper timing directly
+            for u_idx, w_idx in group:
+                result.append(WordTiming(
+                    word=user_words[u_idx],
+                    start=round(whisper_words[w_idx]["start"], 3),
+                    end=round(whisper_words[w_idx]["end"], 3),
+                ))
+        else:
+            # Unmatched words — distribute evenly between prev_end and next_start
             prev_end = result[-1].end if result else 0.0
-            # Find next matched word's start
-            next_start = prev_end + 0.3
-            for k in range(len(pairs)):
-                if pairs[k][0] > u_idx and pairs[k][1] >= 0:
-                    next_start = whisper_words[pairs[k][1]]["start"]
+
+            # Find next matched group's first word start
+            next_start = None
+            for g2 in range(group_idx + 1, len(groups)):
+                if groups[g2][0]:  # is_matched
+                    first_w_idx = groups[g2][1][0][1]
+                    next_start = whisper_words[first_w_idx]["start"]
                     break
-            mid = (prev_end + next_start) / 2
-            if mid <= prev_end:
-                mid = prev_end + 0.15
-            result.append(WordTiming(
-                word=user_words[u_idx],
-                start=round(prev_end, 3),
-                end=round(min(mid + 0.3, next_start if next_start > mid else mid + 0.3), 3),
-            ))
+
+            if next_start is None:
+                # No more matched words after — extend from prev_end
+                next_start = prev_end + 0.3 * len(group)
+
+            num_unmatched = len(group)
+            slot_duration = (next_start - prev_end) / num_unmatched if num_unmatched > 0 else 0.2
+
+            # Ensure minimum word duration
+            if slot_duration < 0.08:
+                slot_duration = 0.08
+
+            for k, (u_idx, _) in enumerate(group):
+                w_start = prev_end + k * slot_duration
+                w_end = w_start + slot_duration
+                # Don't overlap with next matched word
+                if next_start is not None and w_end > next_start:
+                    w_end = next_start
+                if w_start >= w_end:
+                    w_start = w_end - 0.05
+                result.append(WordTiming(
+                    word=user_words[u_idx],
+                    start=round(max(0, w_start), 3),
+                    end=round(w_end, 3),
+                ))
+
     return result if result else None
 
 

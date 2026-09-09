@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, Activity, Palette, Gauge, Zap, Play, Pause, Scissors, ZoomIn, ZoomOut } from 'lucide-react';
 import type { BPMResult, TrackAnalysis, AudioInfo } from '../types';
 import { api } from '../api/client';
@@ -23,7 +23,8 @@ export function AnalysisPanel({
   const [playTime, setPlayTime] = useState(0);
   const [rangeStart, setRangeStart] = useState(0);
   const [rangeEnd, setRangeEnd] = useState(0);
-  const [dragging, setDragging] = useState<null | 'start' | 'end' | 'move'>(null);
+  const [dragging, setDragging] = useState<null | 'start' | 'end' | 'move' | 'seek'>(null);
+  const [seekCursor, setSeekCursor] = useState(0); // silver draggable cursor — sets playback position
   const [zoomLevel, setZoomLevel] = useState(1);  // 1 = full track, 20 = detailed
   const [zoomCenter, setZoomCenter] = useState(0); // center of viewport in seconds
   const [buffered, setBuffered] = useState(false);
@@ -64,27 +65,60 @@ export function AnalysisPanel({
     }
   }, [clipRange]);
 
-  // Audio playback tracking + buffering
+  // Audio element ref + rAF — smooth 60fps playhead
+  const rafIdRef = useRef<number | null>(null);
+
+  // Start rAF loop for smooth playhead tracking
+  const startRaf = useCallback(() => {
+    if (rafIdRef.current !== null) return; // already running
+    const audio = audioRef.current;
+    if (!audio) return;
+    let lastT = -1;
+    const tick = () => {
+      const t = audio.currentTime;
+      if (t !== lastT) {
+        setPlayTime(t);
+        lastT = t;
+      }
+      rafIdRef.current = requestAnimationFrame(tick);
+    };
+    rafIdRef.current = requestAnimationFrame(tick);
+  }, []);
+
+  const stopRaf = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopRaf();
+  }, [stopRaf]);
+
+  // Sync isPlaying state from audio element events (safety net)
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const onTime = () => {
-      setPlayTime(audio.currentTime);
-    };
     const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onPause = () => { setIsPlaying(false); stopRaf(); setPlayTime(audio.currentTime); };
+    const onEnded = () => { setIsPlaying(false); stopRaf(); };
+    const onSeeked = () => setPlayTime(audio.currentTime);
     const onCanPlayThrough = () => setBuffered(true);
-    audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('pause', onPause);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('seeked', onSeeked);
     audio.addEventListener('canplaythrough', onCanPlayThrough);
     return () => {
-      audio.removeEventListener('timeupdate', onTime);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('seeked', onSeeked);
       audio.removeEventListener('canplaythrough', onCanPlayThrough);
     };
-  }, [audioUrl]);
+  }, [audioUrl, stopRaf]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -92,9 +126,26 @@ export function AnalysisPanel({
     if (isPlaying) {
       audio.pause();
       setIsPlaying(false);
+      stopRaf();
+      setPlayTime(audio.currentTime);
     } else {
+      // Seek to seekCursor position before playing
+      if (Math.abs(audio.currentTime - seekCursor) > 0.1) {
+        audio.currentTime = seekCursor;
+      }
       const p = audio.play();
-      if (p) p.then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+      if (p) {
+        p.then(() => {
+          setIsPlaying(true);
+          startRaf(); // Start 60fps rAF loop directly here
+        }).catch((err) => {
+          console.error('Audio play failed:', err);
+          setIsPlaying(false);
+        });
+      } else {
+        setIsPlaying(true);
+        startRaf();
+      }
     }
   };
 
@@ -104,6 +155,7 @@ export function AnalysisPanel({
       audio.currentTime = t;
       setPlayTime(t);
     }
+    setSeekCursor(t);
   };
 
   // Waveform interaction — viewport-relative for zoom
@@ -114,6 +166,15 @@ export function AnalysisPanel({
   const viewportStart = Math.max(0, Math.min(duration - viewportSize, zoomCenter - viewportSize / 2));
   const viewportEnd = Math.min(duration, viewportStart + viewportSize);
 
+  // Auto-follow: when playing + zoomed, keep playhead in view by shifting viewport
+  useEffect(() => {
+    if (!isPlaying || zoomLevel <= 1.1) return;
+    if (playTime < viewportStart + viewportSize * 0.1) return;
+    if (playTime <= viewportEnd - viewportSize * 0.1) return;
+    const newCenter = Math.min(duration - viewportSize / 2, playTime + viewportSize * 0.3);
+    setZoomCenter(Math.max(viewportSize / 2, newCenter));
+  }, [playTime, isPlaying, zoomLevel, viewportStart, viewportEnd, viewportSize, duration]);
+
   const timeToX = (t: number) => viewportSize === 0 ? 0 : ((t - viewportStart) / viewportSize) * 100;
   const xToTime = (clientX: number) => {
     const rect = waveformRef.current?.getBoundingClientRect();
@@ -122,13 +183,23 @@ export function AnalysisPanel({
     return viewportStart + pct * viewportSize;
   };
 
-  const handleWaveformMouseDown = (e: React.MouseEvent, mode: 'start' | 'end' | 'move' | 'seek') => {
+  const handleWaveformMouseDown = (e: React.MouseEvent, mode: 'start' | 'end' | 'move' | 'seek' | 'seek-click') => {
     e.preventDefault();
     e.stopPropagation();
-    if (mode === 'seek') {
+    if (mode === 'seek' || mode === 'seek-click') {
       const t = Math.max(0, Math.min(duration, xToTime(e.clientX)));
       seekTo(t);
-      setZoomCenter(t); // center viewport on click position
+      if (mode === 'seek-click') {
+        setZoomCenter(t); // only center on click, not on drag
+        // Start playback from clicked position
+        const audio = audioRef.current;
+        if (audio && audio.paused) {
+          audio.play().then(() => {
+            setIsPlaying(true);
+            startRaf();
+          }).catch((err) => console.error('Audio play failed:', err));
+        }
+      }
       return;
     }
     setDragging(mode);
@@ -139,7 +210,9 @@ export function AnalysisPanel({
     const onMove = (e: MouseEvent) => {
       const t = Math.max(0, Math.min(duration, xToTime(e.clientX)));
 
-      if (dragging === 'start') {
+      if (dragging === 'seek') {
+        seekTo(t);
+      } else if (dragging === 'start') {
         const newStart = Math.min(t, rangeEnd - 1);
         setRangeStart(newStart);
         onClipRangeChange(newStart, rangeEnd);
@@ -281,7 +354,7 @@ export function AnalysisPanel({
             >
               {isPlaying ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white ml-0.5" />}
             </button>
-            <span className="text-gray-400 text-sm font-mono">{fmtTime(playTime)}</span>
+            <span className="text-gray-400 text-sm font-mono">{fmtTime(isPlaying ? playTime : seekCursor)}</span>
             {!buffered && <span className="text-xs text-yellow-500 animate-pulse">buffering...</span>}
             {buffered && <span className="text-xs text-green-500">● ready</span>}
           </div>
@@ -310,7 +383,7 @@ export function AnalysisPanel({
           <div
             ref={waveformRef}
             className="relative h-24 bg-black/40 rounded-lg cursor-pointer overflow-hidden select-none"
-            onMouseDown={(e) => handleWaveformMouseDown(e, 'seek')}
+            onMouseDown={(e) => handleWaveformMouseDown(e, 'seek-click')}
           >
             {/* RMS waveform bars — filtered by viewport */}
             <div className="absolute inset-0 flex items-end gap-px px-1">
@@ -368,35 +441,122 @@ export function AnalysisPanel({
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
             </div>
 
-            {/* Move handle (center) */}
+            {/* Move handle — thin strip at top of range (drag to move segment) */}
             <div
-              className="absolute top-0 bottom-0 cursor-grab z-5"
+              className="absolute top-0 h-1.5 cursor-grab z-5 hover:bg-purple-300/40 rounded-t transition-colors"
               style={{
                 left: `${timeToX(rangeStart)}%`,
                 width: `${Math.max(0.5, timeToX(rangeEnd) - timeToX(rangeStart))}%`,
               }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'move')}
+              title="Drag to move segment"
             />
 
-            {/* Playhead */}
+            {/* Silver seek cursor — draggable, sets playback position */}
             <div
-              className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 z-20 pointer-events-none"
-              style={{ left: `${timeToX(playTime)}%` }}
-            />
+              className="absolute top-0 bottom-0 z-25 cursor-ew-resize group"
+              style={{ left: `${timeToX(seekCursor)}%` }}
+              onMouseDown={(e) => handleWaveformMouseDown(e, 'seek')}
+            >
+              {/* Thin line */}
+              <div className="absolute top-0 bottom-0 w-0.5 bg-gray-300 group-hover:bg-gray-100 transition-colors" />
+              {/* Draggable handle (visible circle) */}
+              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-gray-300 group-hover:bg-white border border-gray-400 shadow-md transition-colors" />
+            </div>
+
+            {/* Red playhead — 60fps smooth via rAF, always visible */}
+            <div
+              className="absolute top-0 bottom-0 w-[2px] bg-red-500 z-30 pointer-events-none"
+              style={{ left: `${Math.max(0, Math.min(100, timeToX(playTime)))}%` }}
+            >
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-red-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.9)]" />
+              <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-red-500 rounded-full" />
+            </div>
           </div>
 
-          {/* Viewport indicator (when zoomed) */}
+          {/* Scroll bar — when zoomed, shows viewport position in full track */}
           {zoomLevel > 1.1 && (
-            <div className="flex items-center gap-2 text-[10px] text-gray-500 font-mono">
-              <span>{fmtTime(viewportStart)} → {fmtTime(viewportEnd)}</span>
-              <span className="text-gray-600">(zoomed {zoomLevel.toFixed(1)}x)</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const newCenter = Math.max(viewportSize / 2, zoomCenter - viewportSize * 0.5);
+                  setZoomCenter(Math.min(duration - viewportSize / 2, newCenter));
+                }}
+                className="p-1 hover:bg-[#2a2a3a] rounded transition"
+                title="Scroll left"
+              >
+                <span className="text-gray-400 text-xs">◀</span>
+              </button>
+              <div
+                className="relative flex-1 h-5 bg-[#0a0a0f] border border-[#1a1a2a] rounded-lg cursor-pointer"
+                onMouseDown={(e) => {
+                  const trackEl = e.currentTarget;
+                  const startDragX = e.clientX;
+                  const startVpStart = viewportStart;
+                  const trackRect = trackEl.getBoundingClientRect();
+
+                  const handleScrollMove = (ev: MouseEvent) => {
+                    const dx = ev.clientX - startDragX;
+                    const deltaT = (dx / trackRect.width) * duration;
+                    const newStart = Math.max(0, Math.min(duration - viewportSize, startVpStart + deltaT));
+                    setZoomCenter(newStart + viewportSize / 2);
+                  };
+                  const handleScrollUp = () => {
+                    window.removeEventListener('mousemove', handleScrollMove);
+                    window.removeEventListener('mouseup', handleScrollUp);
+                  };
+
+                  // Click-to-jump
+                  const pct = (e.clientX - trackRect.left) / trackRect.width;
+                  const newStart = Math.max(0, Math.min(duration - viewportSize, pct * duration - viewportSize / 2));
+                  setZoomCenter(newStart + viewportSize / 2);
+
+                  window.addEventListener('mousemove', handleScrollMove);
+                  window.addEventListener('mouseup', handleScrollUp);
+                }}
+              >
+                {/* Mini waveform preview */}
+                {audioInfo?.rms_values && (
+                  <div className="absolute inset-0 flex items-end gap-px px-1 pb-0.5 pointer-events-none">
+                    {audioInfo.rms_values.map((v: number, i: number) => (
+                      <div key={i} className="flex-1 bg-purple-500/10 rounded-sm" style={{ height: `${Math.min(100, v * 150)}%` }} />
+                    ))}
+                  </div>
+                )}
+                {/* Viewport indicator */}
+                <div
+                  className="absolute top-0 bottom-0 bg-purple-500/20 border border-purple-500/50 rounded pointer-events-none"
+                  style={{
+                    left: `${(viewportStart / duration) * 100}%`,
+                    width: `${Math.max(2, (viewportSize / duration) * 100)}%`,
+                  }}
+                />
+                {/* Seek cursor on minimap */}
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-gray-400/60 pointer-events-none"
+                  style={{ left: `${(seekCursor / duration) * 100}%` }}
+                />
+              </div>
+              <button
+                onClick={() => {
+                  const newCenter = Math.min(duration - viewportSize / 2, zoomCenter + viewportSize * 0.5);
+                  setZoomCenter(Math.max(viewportSize / 2, newCenter));
+                }}
+                className="p-1 hover:bg-[#2a2a3a] rounded transition"
+                title="Scroll right"
+              >
+                <span className="text-gray-400 text-xs">▶</span>
+              </button>
+              <span className="text-[10px] text-gray-500 font-mono whitespace-nowrap">
+                {fmtTime(viewportStart)} → {fmtTime(viewportEnd)}
+              </span>
             </div>
           )}
 
           {/* Range info */}
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-400">
-              Drag the <span className="text-purple-400">purple handles</span> to select your segment
+              <span className="text-gray-300">Click waveform to play</span> · <span className="text-purple-400">Purple handles</span> = segment · <span className="text-red-400">Red line</span> = playing
             </span>
             <span className="text-white font-bold">
               Clip length: <span className="text-purple-400">{clipLength.toFixed(1)}s</span>
