@@ -204,9 +204,11 @@ def _dtw_align(
             num_unmatched = len(group)
             slot_duration = (next_start - prev_end) / num_unmatched if num_unmatched > 0 else 0.2
 
-            # Ensure minimum word duration
-            if slot_duration < 0.08:
-                slot_duration = 0.08
+            # Ensure minimum word duration — but never wider than available space
+            if slot_duration < 0.04:
+                slot_duration = 0.04
+            if next_start is not None:
+                slot_duration = min(slot_duration, (next_start - prev_end) / num_unmatched)
 
             for k, (u_idx, _) in enumerate(group):
                 w_start = prev_end + k * slot_duration
@@ -215,12 +217,24 @@ def _dtw_align(
                 if next_start is not None and w_end > next_start:
                     w_end = next_start
                 if w_start >= w_end:
-                    w_start = w_end - 0.05
+                    w_start = max(0, w_end - 0.04)
                 result.append(WordTiming(
                     word=user_words[u_idx],
                     start=round(max(0, w_start), 3),
-                    end=round(w_end, 3),
+                    end=round(max(w_start + 0.01, w_end), 3),
                 ))
+
+    # ── De-overlap pass: ensure no word starts before the previous word ends ──
+    for i in range(1, len(result)):
+        if result[i].start < result[i - 1].end:
+            new_start = result[i - 1].end
+            if new_start >= result[i].end:
+                new_start = max(0, result[i].end - 0.04)
+            result[i] = WordTiming(
+                word=result[i].word,
+                start=round(new_start, 3),
+                end=round(result[i].end, 3),
+            )
 
     return result if result else None
 
