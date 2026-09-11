@@ -63,7 +63,7 @@ def align_lyrics_to_timings(
 
     # Strategy 1: Exact count match — direct mapping
     if len(user_words) == len(whisper_words):
-        return [
+        result = [
             WordTiming(
                 word=user_words[i],
                 start=round(whisper_starts[i], 3),
@@ -71,11 +71,12 @@ def align_lyrics_to_timings(
             )
             for i in range(len(user_words))
         ]
+        return _global_de_overlap(result)
 
     # Strategy 2: DTW alignment — preserves ALL user words
     aligned = _dtw_align(user_words, user_norm, whisper_words, whisper_norm)
     if aligned and len(aligned) >= len(user_words) * 0.5:
-        return aligned
+        return _global_de_overlap(aligned)
 
     # Strategy 3: Position-aware matching
     # Match each user word to the whisper word at the same relative position
@@ -84,12 +85,55 @@ def align_lyrics_to_timings(
         whisper_starts, whisper_ends,
     )
     if pos_aligned and len(pos_aligned) >= len(user_words) * 0.5:
-        return pos_aligned
+        return _global_de_overlap(pos_aligned)
 
     # Strategy 4: Proportional distribution (last resort)
-    return _proportional_distribute(
+    result = _proportional_distribute(
         user_words, whisper_words, whisper_starts, whisper_ends
     )
+
+    # ── Global de-overlap pass: runs after ANY strategy ──
+    # Sort by start time, then ensure no word starts before previous word ends.
+    # This catches overlaps from whisper's own timestamps, position_align
+    # mapping multiple words to same slot, or any other source.
+    result = _global_de_overlap(result)
+
+    return result
+
+
+def _global_de_overlap(words: list[WordTiming]) -> list[WordTiming]:
+    """Sort by start time and remove all overlaps.
+
+    Ensures each word starts at or after the previous word ends.
+    If shrinking makes a word shorter than 40ms, give it 40ms anyway
+    (may cause minor overlap but avoids zero-duration words).
+    """
+    if not words:
+        return words
+
+    # Sort by start time (stable — preserves original order for equal starts)
+    sorted_words = sorted(words, key=lambda w: w.start)
+
+    result: list[WordTiming] = []
+    for w in sorted_words:
+        if result:
+            prev_end = result[-1].end
+            new_start = max(w.start, prev_end)
+            if new_start >= w.end:
+                # No room — give minimum 40ms slot starting at prev_end
+                new_start = prev_end
+                new_end = prev_end + 0.04
+            else:
+                new_end = w.end
+            result.append(WordTiming(
+                word=w.word,
+                start=round(new_start, 3),
+                end=round(new_end, 3),
+            ))
+        else:
+            result.append(w)
+
+    return result
 
 
 def _dtw_align(

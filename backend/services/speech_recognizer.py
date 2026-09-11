@@ -8,6 +8,35 @@ import os
 import logging
 from typing import Optional
 
+
+def _deoverlap_whisper_words(words: list[dict]) -> list[dict]:
+    """Sort by start time and remove overlapping timestamps from whisperX.
+    
+    wav2vec2 alignment can produce words where start < previous word's end,
+    especially for fast Russian speech. This ensures sequential non-overlap.
+    """
+    if not words:
+        return words
+
+    sorted_words = sorted(words, key=lambda w: w.get("start", 0))
+    result: list[dict] = []
+    for w in sorted_words:
+        if result:
+            prev_end = result[-1]["end"]
+            new_start = max(w.get("start", 0), prev_end)
+            w_end = w.get("end", 0)
+            if new_start >= w_end:
+                new_start = prev_end
+                w_end = prev_end + 0.04
+            result.append({
+                **w,
+                "start": round(new_start, 3),
+                "end": round(w_end, 3),
+            })
+        else:
+            result.append(w)
+    return result
+
 logger = logging.getLogger(__name__)
 
 # Cache model instances (loaded on first use)
@@ -152,6 +181,11 @@ def transcribe_audio(
         full_text_parts.append(seg_data["text"])
     
     logger.info(f"WhisperX done: {len(all_words)} words, {len(all_segments)} segments")
+    
+    # ── De-overlap whisper words: wav2vec2 alignment can produce
+    # overlapping timestamps (especially for fast speech / Russian).
+    # Ensure no word starts before the previous word ends.
+    all_words = _deoverlap_whisper_words(all_words)
     
     return {
         "text": " ".join(full_text_parts),
