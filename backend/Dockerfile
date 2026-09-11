@@ -33,6 +33,10 @@ RUN pip install --no-cache-dir torchvision==0.28.0+cpu --index-url https://downl
 # Replaces faster-whisper + MMS FA with a single, more accurate pipeline
 RUN pip install --no-cache-dir whisperx
 
+# Install CrisperWhisper (alternative engine — 2x more accurate timestamps)
+# Uses transformers backend to avoid ctranslate2 conflict with WhisperX
+RUN pip install --no-cache-dir "crisperwhisper[transformers]"
+
 COPY . .
 
 # Custom Cyrillic fonts are copied at runtime via docker volume

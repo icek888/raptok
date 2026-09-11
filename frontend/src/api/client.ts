@@ -283,6 +283,7 @@ export const api = {
     onProgress?: (data: { step: string; label: string; progress: number; elapsed?: number }) => void,
     clipStart: number = 0,
     clipLength: number = 0,
+    engine: string = 'whisperx',
   ): Promise<TranscribeResult & { total_duration?: number; bpm?: number }> => {
     return new Promise((resolve, reject) => {
       const form = new FormData();
@@ -292,6 +293,7 @@ export const api = {
       if (modelSize) form.append('model_size', modelSize);
       if (clipStart > 0) form.append('clip_start', String(clipStart));
       if (clipLength > 0) form.append('clip_length', String(clipLength));
+      if (engine) form.append('engine', engine);
 
       // Use fetch with streaming response
       fetch(`${API_BASE}/transcribe-full-stream`, { method: 'POST', body: form, credentials: 'include' })

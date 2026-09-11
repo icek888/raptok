@@ -29,7 +29,7 @@ async def api_transcribe(req: TranscribeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _run_transcription_pipeline(audio_path: str, language: str, lyrics: str, model_size: str):
+async def _run_transcription_pipeline(audio_path: str, language: str, lyrics: str, model_size: str, engine: str = "whisperx"):
     """Shared pipeline: stem separation → WhisperX → alignment.
     Returns dict with result fields.
     """
@@ -62,11 +62,26 @@ async def _run_transcription_pipeline(audio_path: str, language: str, lyrics: st
     except Exception as e:
         logger.warning(f"Vocal enhancement skipped: {e}")
 
-    # Step 2: WhisperX transcribe + align
-    whisper_result = transcribe_audio(
-        whisper_input, language=language, word_timestamps=True,
-        lyrics=lyrics, model_size=model_size,
-    )
+    # Step 2: Transcribe + align (WhisperX or CrisperWhisper)
+    if engine == "crisper":
+        from services.crisper_transcriber import transcribe_audio_crisper, is_crisper_available
+        if not is_crisper_available():
+            logger.warning("CrisperWhisper not available, falling back to WhisperX")
+            whisper_result = transcribe_audio(
+                whisper_input, language=language, word_timestamps=True,
+                lyrics=lyrics, model_size=model_size,
+            )
+        else:
+            # CrisperWhisper handles lyrics via forced_align internally
+            whisper_result = transcribe_audio_crisper(
+                whisper_input, language=language,
+                lyrics=lyrics, model_size="small",
+            )
+    else:
+        whisper_result = transcribe_audio(
+            whisper_input, language=language, word_timestamps=True,
+            lyrics=lyrics, model_size=model_size,
+        )
     whisper_words = whisper_result.get("words", [])
     user_lyrics = lyrics.strip() if lyrics else ""
 
@@ -107,10 +122,11 @@ async def api_transcribe_full(
     language: str = Form("en"),
     lyrics: str = Form(""),
     model_size: str = Form(""),
+    engine: str = Form("whisperx"),
 ):
     """Transcribe ENTIRE audio track. Returns absolute word timestamps."""
     try:
-        return await _run_transcription_pipeline(audio_path, language, lyrics, model_size)
+        return await _run_transcription_pipeline(audio_path, language, lyrics, model_size, engine=engine)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -123,6 +139,7 @@ async def api_transcribe_full_stream(
     model_size: str = Form(""),
     clip_start: float = Form(0.0, ge=0),
     clip_length: float = Form(0.0, ge=0),
+    engine: str = Form("whisperx"),
 ):
     """Transcribe with SSE progress updates.
     
@@ -183,14 +200,29 @@ async def api_transcribe_full_stream(
                 logger.warning(f"Stem separation failed ({e})")
                 yield f"data: {json.dumps({'step': 'separation', 'label': 'Using original audio (separation skipped)', 'progress': 30, 'elapsed': elapsed()})}\n\n"
 
-            # Step 2: WhisperX transcription (on segment)
+            # Step 2: Transcription (WhisperX or CrisperWhisper)
+            engine_label = "CrisperWhisper" if engine == "crisper" else "WhisperX"
             model_label = model_size or "small"
-            yield f"data: {json.dumps({'step': 'transcription', 'label': f'WhisperX transcribing ({model_label})...', 'progress': 35, 'elapsed': elapsed()})}\n\n"
+            yield f"data: {json.dumps({'step': 'transcription', 'label': f'{engine_label} transcribing ({model_label})...', 'progress': 35, 'elapsed': elapsed()})}\n\n"
             loop = asyncio.get_event_loop()
-            whisper_result = await loop.run_in_executor(
-                None,
-                lambda: transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size),
-            )
+            if engine == "crisper":
+                from services.crisper_transcriber import transcribe_audio_crisper, is_crisper_available
+                if is_crisper_available():
+                    whisper_result = await loop.run_in_executor(
+                        None,
+                        lambda: transcribe_audio_crisper(whisper_input, language=language, lyrics=lyrics, model_size="small"),
+                    )
+                else:
+                    logger.warning("CrisperWhisper not available, falling back to WhisperX")
+                    whisper_result = await loop.run_in_executor(
+                        None,
+                        lambda: transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size),
+                    )
+            else:
+                whisper_result = await loop.run_in_executor(
+                    None,
+                    lambda: transcribe_audio(whisper_input, language=language, word_timestamps=True, lyrics=lyrics, model_size=model_size),
+                )
             whisper_words = whisper_result.get("words", [])
             
             # ── Shift word timestamps back to absolute (clip_start offset) ──

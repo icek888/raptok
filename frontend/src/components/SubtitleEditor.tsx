@@ -58,6 +58,7 @@ export function SubtitleEditor({
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeLang, setTranscribeLang] = useState('ru');
   const [whisperModel, setWhisperModel] = useState('small');
+  const [engine, setEngine] = useState<'whisperx' | 'crisper'>('whisperx');
   const [wordSplitLoading, setWordSplitLoading] = useState(false);
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
   const [, setAudioLoading] = useState(false);
@@ -211,6 +212,7 @@ export function SubtitleEditor({
         (data) => setTranscribeStatus({ label: data.label, progress: data.progress, elapsed: data.elapsed }),
         isSegment ? 0 : audioStart,    // clip_start = 0 for pre-cut segment
         isSegment ? 0 : (audioEnd - audioStart),  // clip_length = 0 = use whole file
+        engine,
       );
 
       setFullTrackWords(result.words);
@@ -482,6 +484,15 @@ export function SubtitleEditor({
               <option value="ru">🇷🇺 RU</option>
               <option value="en">🇬🇧 EN</option>
               <option value="auto">🌍 Auto</option>
+            </select>
+            <select
+              value={engine}
+              onChange={e => setEngine(e.target.value as 'whisperx' | 'crisper')}
+              className="bg-[#0a0a0f] border border-[#2a2a3a] rounded-lg px-2 py-1.5 text-xs text-gray-200"
+              title="Transcription engine — CrisperWhisper: 2x more accurate timestamps (30ms vs 65ms)"
+            >
+              <option value="whisperx">⚡ WhisperX</option>
+              <option value="crisper">🎯 CrisperWhisper</option>
             </select>
             <select
               value={whisperModel}
