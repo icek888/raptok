@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Music, Activity, Type, Film, Scissors, Eye, Wand2, LogOut, LayoutDashboard } from 'lucide-react';
+import { Music, Activity, Type, Film, Scissors, Eye, Wand2, LogOut, LayoutDashboard, FlaskConical } from 'lucide-react';
 import { AudioInput } from './components/AudioInput';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { InputPanel } from './components/InputPanel';
 import { FragmentEditor } from './components/FragmentEditor';
+import { FragmentsPreviewMerged } from './components/FragmentsPreviewMerged';
 import { SubtitleEditor } from './components/SubtitleEditor';
 import { VideoPreviewEditor } from './components/VideoPreviewEditor';
 import { RenderPanel } from './components/RenderPanel';
@@ -26,11 +27,29 @@ const STEPS = [
   { id: 6 as Step, label: 'Render', icon: Wand2 },
 ];
 
+// Lab mode: 6 steps — Fragments + Preview merged into one
+const STEPS_LAB = [
+  { id: 0 as Step, label: 'Audio', icon: Music },
+  { id: 1 as Step, label: 'Analysis', icon: Activity },
+  { id: 2 as Step, label: 'Lyrics', icon: Type },
+  { id: 3 as Step, label: 'Video', icon: Film },
+  { id: 4 as Step, label: 'Fragments & Preview', icon: Eye },
+  { id: 5 as Step, label: 'Render', icon: Wand2 },
+];
+
 function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [username, setUsername] = useState('');
   const [userRole, setUserRole] = useState('user');
   const [step, setStep] = useState<Step>(0);
+  const [labMode, setLabMode] = useState<boolean>(
+    () => localStorage.getItem('raptok_lab_mode') === 'true'
+  );
+
+  // Persist lab mode
+  useEffect(() => {
+    localStorage.setItem('raptok_lab_mode', String(labMode));
+  }, [labMode]);
 
   // ── Persisted state: saved to localStorage on every change, restored on mount ──
   const STORAGE_KEY = 'raptok_session_v3';
@@ -305,6 +324,17 @@ function App() {
 
   // ── canProceed logic ──
   const canProceed = (s: Step): boolean => {
+    if (labMode) {
+      switch (s) {
+        case 0: return !!audioPath;
+        case 1: return !!bpmData;
+        case 2: return subtitles.length > 0 || wordTimings.length > 0;
+        case 3: return !!videoInfo;
+        case 4: return fragments.length >= 3; // merged fragments+preview
+        case 5: return true; // render
+        default: return true;
+      }
+    }
     switch (s) {
       case 0: return !!audioPath;          // Audio uploaded
       case 1: return !!bpmData;             // Analysis done
@@ -407,6 +437,19 @@ function App() {
               <LayoutDashboard size={16} />
             </button>
 
+            <button
+              onClick={() => setLabMode(!labMode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                labMode
+                  ? 'bg-purple-500/20 border border-purple-500/40 text-purple-300'
+                  : 'bg-[#1a1a2a] border border-[#2a2a3a] text-gray-500 hover:text-gray-300'
+              }`}
+              title="Toggle experimental merged fragments+preview mode"
+            >
+              <FlaskConical size={14} />
+              Lab: {labMode ? 'ON' : 'OFF'}
+            </button>
+
             <span className="text-xs text-gray-500">{username}</span>
             <button
               onClick={handleLogout}
@@ -426,7 +469,7 @@ function App() {
       {/* Step indicator */}
       <div className="max-w-[1800px] mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-8">
-          {STEPS.map((s, i) => {
+          {(labMode ? STEPS_LAB : STEPS).map((s, i) => {
             const Icon = s.icon;
             const isActive = step === s.id;
             const isDone = step > s.id;
@@ -447,7 +490,7 @@ function App() {
                   </div>
                   <span className="text-xs font-medium">{s.label}</span>
                 </button>
-                {i < STEPS.length - 1 && (
+                {i < (labMode ? STEPS_LAB : STEPS).length - 1 && (
                   <div className={`flex-1 h-0.5 mx-2 ${step > s.id ? 'bg-green-500' : 'bg-[#1a1a2a]'}`} />
                 )}
               </div>
@@ -521,8 +564,38 @@ function App() {
             />
           )}
 
-          {/* Step 4: Fragments — simple random cuts locked to segment duration */}
-          {step === 4 && videoInfo && (
+          {/* Step 4 (Lab mode): merged Fragments + Preview */}
+          {labMode && step === 4 && videoInfo && (
+            <FragmentsPreviewMerged
+              videoInfo={videoInfo}
+              videoUrl={videoInfo?.local_path || null}
+              fragments={fragments}
+              onFragmentsChange={handleFragmentsChange}
+              audioPath={segmentPath || audioPath}
+              audioStart={audioStart}
+              subtitles={subtitles}
+              wordTimings={wordTimings}
+              style={style}
+              onStyleChange={setStyle}
+              karaoke={karaoke}
+              onKaraokeChange={setKaraoke}
+              displayMode={displayMode}
+              onDisplayModeChange={setDisplayMode}
+              templateId={templateId}
+              onTemplateChange={setTemplateId}
+              segmentDuration={clipRange ? clipRange.end - clipRange.start : (audioDuration || 30)}
+              bpmData={bpmData}
+              beatEffectsOn={beatEffectsOn}
+              onBeatEffectsToggle={setBeatEffectsOn}
+              onIntensityChange={handleIntensityChange}
+              zoomIntensity={zoomIntensity}
+              flashIntensity={flashIntensity}
+              shakeIntensity={shakeIntensity}
+            />
+          )}
+
+          {/* Step 4 (Normal): Fragments — simple random cuts locked to segment duration */}
+          {!labMode && step === 4 && videoInfo && (
             <FragmentEditor
               videoInfo={videoInfo}
               fragments={fragments}
@@ -532,7 +605,8 @@ function App() {
             />
           )}
 
-          {/* Step 5: Preview + BeatEffectsPanel (keep mounted) */}
+          {/* Step 5 (Normal): Preview + BeatEffectsPanel (keep mounted) */}
+          {!labMode && (
           <div style={{ display: step === 5 ? 'flex' : 'none' }} className="gap-4">
             <div className="flex-1 min-w-0">
               <VideoPreviewEditor
@@ -570,9 +644,10 @@ function App() {
               />
             </div>
           </div>
+          )}
 
-          {/* Step 6: Render */}
-          {step === 6 && (
+          {/* Step 5 (Lab) / Step 6 (Normal): Render */}
+          {step === (labMode ? 5 : 6) && (
             <RenderPanel
               videoInfo={videoInfo}
               fragments={fragments}
@@ -599,7 +674,7 @@ function App() {
         </div>
 
         {/* Navigation */}
-        {step < 6 && (
+        {step < (labMode ? 5 : 6) && (
           <div className="flex justify-between mt-4">
             <button
               onClick={() => setStep(Math.max(0, step - 1) as Step)}
@@ -611,22 +686,23 @@ function App() {
             <button
               onClick={async () => {
                 if (!canProceed(step)) return;
+                const maxStep = labMode ? 5 : 6;
                 if (step === 1 && clipRange && audioPath) {
                   setCutting(true);
                   try {
                     const res = await api.cutSegment(audioPath, clipRange.start, clipRange.end - clipRange.start);
                     setSegmentPath(res.segment_path);
                     console.log('Segment cut:', res.segment_path, res.duration + 's');
-                    setStep(Math.min(6, step + 1) as Step);
+                    setStep(Math.min(maxStep, step + 1) as Step);
                   } catch (e) {
                     console.error('Cut segment failed:', e);
                     alert('Failed to cut segment. Using full track.');
-                    setStep(Math.min(6, step + 1) as Step);
+                    setStep(Math.min(maxStep, step + 1) as Step);
                   } finally {
                     setCutting(false);
                   }
                 } else {
-                  setStep(Math.min(6, step + 1) as Step);
+                  setStep(Math.min(maxStep, step + 1) as Step);
                 }
               }}
               disabled={!canProceed(step) || cutting}
