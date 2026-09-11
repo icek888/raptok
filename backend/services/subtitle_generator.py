@@ -425,25 +425,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     # Use \kf (karaoke fill) for progress bar effect on the whole line
                     
                     if progress_bar:
-                        # Progress bar: a thin line under the text using \kf on a separator
-                        # The \kf tag fills the text from left to right over the word duration
-                        # We use it on the whole line text for the progress effect
+                        # Progress bar mode: one dialogue per chunk, \kf fills text left→right
+                        # \kf MUST be inside {} blocks — it applies to text that follows
+                        # Each word gets its own \kf duration (centiseconds)
                         line_parts = []
                         for w in chunk:
                             w_dur_cs = max(1, int((w.end - w.start) * 100))
-                            line_parts.append(f"{{\\1c{primary}&}}\\kf{w_dur_cs}{{{active}\\fscx{active_scale}\\fscy{active_scale}}}{w.word}{{\\1c{primary}&\\fscx100\\fscy100}} ")
-                        line_text_ass = " ".join(line_parts).strip()
+                            # \kf inside {} — fills this word's text over w_dur_cs
+                            line_parts.append(
+                                f"{{\\1c{primary}&\\kf{w_dur_cs}}}"
+                                f"{{\\1c{active}&\\fscx{active_scale}\\fscy{active_scale}}}{w.word}"
+                                f"{{\\1c{primary}&\\fscx100\\fscy100}} "
+                            )
+                        line_text_ass = "".join(line_parts).strip()
                         events.append(
                             f"Dialogue: 0,{chunk_start},{chunk_end},Default,,0,0,0,,"
                             f"{line_text_ass}"
                         )
                     else:
-                        # Standard line_highlight: each word gets its own dialogue,
-                        # all words shown but only active is colored + scaled
-                        # We emit ONE dialogue per word, but with the FULL line text,
-                        # using \alpha to hide non-active words... 
-                        # Actually: simpler = one dialogue per word showing full line
-                        # with the active word highlighted via inline override.
+                        # Standard line_highlight: one dialogue per word showing full line
+                        # with the active word highlighted via inline override
                         for i, w in enumerate(chunk):
                             w_start = _format_time(w.start)
                             w_end = _format_time(w.end)

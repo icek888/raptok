@@ -108,7 +108,7 @@ TEMPLATES = [
     RenderTemplate(
         id="cinematic",
         name="Cinematic",
-        description="Clear 16:9 video centered, blurred video as background",
+        description="Single word bottom-center, clear video + blurred background",
         font="Montserrat",
         size=68,
         primary_color="&H00FFFFFF",   # white
@@ -117,16 +117,19 @@ TEMPLATES = [
         outline_width=3,
         position="bottom",
         margin_v=140,
+        margin_l=60,
         bold=True,
         video_mode="fit_blur",        # clear video centered, blurred bg
         blur_sigma=25,
         dark_overlay=0.0,             # no dark overlay — see bg clearly
         scale_factor=1.0,
-        display_mode="line_highlight",
+        display_mode="single_word",   # one word at a time
         karaoke=True,
         active_scale=130,
         glow_border=0,
         fade_in=False,
+        max_words_per_line=1,
+        progress_bar=False,
     ),
     RenderTemplate(
         id="lyrics",
