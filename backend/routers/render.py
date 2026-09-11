@@ -8,9 +8,10 @@ from fastapi import APIRouter, HTTPException, Request
 from config import TEMP_DIR
 from models.schemas import (
     RenderRequest, SubtitleLine, Fragment,
-    PreparePreviewRequest,
+    PreparePreviewRequest, FragmentPreview916Request, FragmentPreviewMultiRequest,
 )
 from services.subtitle_generator import generate_ass, rebuild_subtitles_from_words
+from services.thumbnail_generator import get_916_preview
 from services.video_renderer import render_clip
 from routers.helpers import parse_fragments, parse_subtitles
 
@@ -257,5 +258,54 @@ async def prepare_preview(req: PreparePreviewRequest):
                 for i, frag in enumerate(fragments)
             ],
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/fragment-preview-916")
+async def fragment_preview_916(req: FragmentPreview916Request):
+    """Extract a single 9:16 cropped frame for fragment preview."""
+    try:
+        job_id = f"fp916_{os.urandom(4).hex()}"
+        img_path = await asyncio.to_thread(
+            get_916_preview,
+            video_path=req.video_path,
+            timestamp=req.timestamp,
+            crop_mode=req.crop_mode,
+            job_id=job_id,
+        )
+        filename = os.path.basename(img_path)
+        return {
+            "preview_url": f"/api/thumbnail/{filename}",
+            "timestamp": req.timestamp,
+            "crop_mode": req.crop_mode,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/fragment-preview-multi")
+async def fragment_preview_multi(req: FragmentPreviewMultiRequest):
+    """Extract multiple 9:16 cropped frames for scrub preview."""
+    try:
+        job_id = f"fpmulti_{os.urandom(4).hex()}"
+        results = []
+        for i, ts in enumerate(req.timestamps[:5]):  # max 5 frames
+            try:
+                img_path = await asyncio.to_thread(
+                    get_916_preview,
+                    video_path=req.video_path,
+                    timestamp=ts,
+                    crop_mode=req.crop_mode,
+                    job_id=f"{job_id}_{i}",
+                )
+                filename = os.path.basename(img_path)
+                results.append({
+                    "preview_url": f"/api/thumbnail/{filename}",
+                    "timestamp": ts,
+                })
+            except Exception as e:
+                results.append({"timestamp": ts, "error": str(e)})
+        return {"frames": results, "crop_mode": req.crop_mode}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

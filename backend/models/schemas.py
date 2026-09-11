@@ -225,6 +225,20 @@ class PreparePreviewRequest(BaseModel):
     subtitles: Optional[list[dict]] = None
 
 
+class FragmentPreview916Request(BaseModel):
+    """Request a 9:16 cropped preview frame for a fragment."""
+    video_path: str
+    timestamp: float
+    crop_mode: str = "crop_fill"  # crop_fill | fit_blur
+
+
+class FragmentPreviewMultiRequest(BaseModel):
+    """Request multiple 9:16 cropped frames for a fragment (for scrub effect)."""
+    video_path: str
+    timestamps: list[float]  # 3-5 timestamps within the fragment
+    crop_mode: str = "crop_fill"
+
+
 class RenderStatus(BaseModel):
     job_id: str
     status: str  # pending, rendering, completed, error
