@@ -195,3 +195,15 @@ export interface PreviewResult {
   subtitles: SubtitleLine[];
   fragments: { id: number; start: number; end: number; duration: number }[];
 }
+
+// ── 9:16 fragment preview ──
+export interface FragmentPreview916Result {
+  preview_url: string;
+  timestamp: number;
+  crop_mode: string;
+}
+
+export interface FragmentPreviewMultiResult {
+  frames: { preview_url: string; timestamp: number; error?: string }[];
+  crop_mode: string;
+}

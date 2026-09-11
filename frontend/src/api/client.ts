@@ -1,6 +1,7 @@
 import type { 
   VideoInfo, Fragment, FragmentSelection, SubtitleLine, SubtitleStyle, 
-  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate, TrackAnalysis, PreviewResult
+  RenderResult, ThumbnailResult, BPMResult, BeatSyncResult, TranscribeResult, WordTiming, AudioInfo, RenderTemplate, TrackAnalysis, PreviewResult,
+  FragmentPreview916Result, FragmentPreviewMultiResult,
 } from '../types';
 
 const API_BASE = '/api';
@@ -173,6 +174,29 @@ export const api = {
       audio_start: audioStart || 0,
       word_timings: wordTimings || null,
       subtitles: subtitles || null,
+    }),
+
+  // ── 9:16 fragment preview (Lab mode) ──
+  fragmentPreview916: (
+    videoPath: string,
+    timestamp: number,
+    cropMode: string = 'crop_fill',
+  ): Promise<FragmentPreview916Result> =>
+    postJSON(`${API_BASE}/fragment-preview-916`, {
+      video_path: videoPath,
+      timestamp,
+      crop_mode: cropMode,
+    }),
+
+  fragmentPreviewMulti: (
+    videoPath: string,
+    timestamps: number[],
+    cropMode: string = 'crop_fill',
+  ): Promise<FragmentPreviewMultiResult> =>
+    postJSON(`${API_BASE}/fragment-preview-multi`, {
+      video_path: videoPath,
+      timestamps,
+      crop_mode: cropMode,
     }),
 
   uploadAudio: (file: File): Promise<{ path: string; filename: string; size: number }> => {
