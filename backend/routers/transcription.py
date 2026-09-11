@@ -36,8 +36,21 @@ async def _run_transcription_pipeline(audio_path: str, language: str, lyrics: st
     # Step 1: Stem separation
     try:
         vocal_path = await separate_vocals(audio_path, method="auto")
-        whisper_input = vocal_path
-        logger.info(f"Using isolated vocals: {vocal_path}")
+        # Check vocal quality — if too quiet/small, use original
+        import os as _os, re as _re, subprocess as _sp
+        vocal_size = _os.path.getsize(vocal_path)
+        orig_size = _os.path.getsize(audio_path)
+        size_ratio = vocal_size / orig_size if orig_size > 0 else 1
+        vol_out = _sp.run(["ffmpeg", "-i", vocal_path, "-af", "volumedetect", "-vn", "-f", "null", "/dev/null"],
+                          capture_output=True, text=True)
+        mean_match = _re.search(r"mean_volume:\s*(-?\d+\.?\d*)\s*dB", vol_out.stderr)
+        mean_vol = float(mean_match.group(1)) if mean_match else -10
+        if mean_vol < -25 or size_ratio < 0.15:
+            logger.warning(f"Vocal isolation poor quality (mean_vol={mean_vol}dB, ratio={size_ratio:.2f}), using original audio")
+            whisper_input = audio_path
+        else:
+            whisper_input = vocal_path
+            logger.info(f"Using isolated vocals: {vocal_path} (mean_vol={mean_vol}dB)")
     except Exception as e:
         logger.warning(f"Stem separation failed ({e}), using original audio")
         whisper_input = audio_path
@@ -143,8 +156,29 @@ async def api_transcribe_full_stream(
             yield f"data: {json.dumps({'step': 'separation', 'label': 'Separating vocals from music...', 'progress': 10, 'elapsed': elapsed()})}\n\n"
             try:
                 vocal_path = await separate_vocals(whisper_input, method="auto")
-                whisper_input = vocal_path
-                yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocals isolated ✓', 'progress': 30, 'elapsed': elapsed()})}\n\n"
+                # Check if vocal isolation produced usable audio
+                import os as _os
+                vocal_size = _os.path.getsize(vocal_path)
+                orig_size = _os.path.getsize(whisper_input)
+                size_ratio = vocal_size / orig_size if orig_size > 0 else 1
+                # ffmpeg volumedetect check
+                vol_proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg", "-i", vocal_path, "-af", "volumedetect", "-vn", "-f", "null", "/dev/null",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                vol_stdout, vol_stderr = await vol_proc.communicate()
+                vol_err = vol_stderr.decode("utf-8", errors="ignore")
+                import re as _re
+                mean_match = _re.search(r"mean_volume:\s*(-?\d+\.?\d*)\s*dB", vol_err)
+                mean_vol = float(mean_match.group(1)) if mean_match else -10
+                logger.info(f"Vocal quality: mean_vol={mean_vol}dB, size_ratio={size_ratio:.2f}")
+                # If vocals are too quiet (mean < -25dB) or too small (<15% of original), use original
+                if mean_vol < -25 or size_ratio < 0.15:
+                    logger.warning(f"Vocal isolation poor quality, using original audio")
+                    yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocal isolation too quiet, using full audio', 'progress': 30, 'elapsed': elapsed()})}\n\n"
+                else:
+                    whisper_input = vocal_path
+                    yield f"data: {json.dumps({'step': 'separation', 'label': 'Vocals isolated ✓', 'progress': 30, 'elapsed': elapsed()})}\n\n"
             except Exception as e:
                 logger.warning(f"Stem separation failed ({e})")
                 yield f"data: {json.dumps({'step': 'separation', 'label': 'Using original audio (separation skipped)', 'progress': 30, 'elapsed': elapsed()})}\n\n"
