@@ -329,8 +329,13 @@ def generate_ass(
     margin_v = style.margin_v
     bold_flag = "-1" if style.bold else "0"
     
-    alignment_map = {"bottom": 2, "center": 5, "top": 8}
+    alignment_map = {"bottom": 2, "center": 5, "top": 8, "bottom_left": 1, "bottom_right": 3}
     alignment = alignment_map.get(position, 2)
+    
+    # Margin L/R from style (fallback to template or default)
+    margin_l_val = style.margin_l if hasattr(style, 'margin_l') and style.margin_l else (template.get("margin_l", 60) if template else 60)
+    max_words_per_line = template.get("max_words_per_line", 8) if template else 8
+    progress_bar = template.get("progress_bar", False) if template else False
     
     ass_header = f"""[Script Info]
 Script Type: v4.00+
@@ -340,7 +345,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary},{active if karaoke else primary},{outline},&H64000000,{bold_flag},0,0,0,100,100,0,0,1,{outline_w},{glow_border if glow_border > 0 else 2},{alignment},60,60,{margin_v},1
+Style: Default,{font},{size},{primary},{active if karaoke else primary},{outline},&H64000000,{bold_flag},0,0,0,100,100,0,0,1,{outline_w},{glow_border if glow_border > 0 else 2},{alignment},{margin_l_val},{margin_l_val},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -384,6 +389,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 continue
             
             words = sub.words
+            num_words = len(words)
             
             if effective_mode in ("word_by_word", "single_word"):
                 # MODE 1: Only the active word shown at a time (matches preview)
@@ -402,43 +408,57 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     )
             
             else:
-                # MODE 2: line_highlight — full line visible, active word yellow + bigger
-                line_text = " ".join(w.word for w in words)
-                num_words = len(words)
-                too_long = len(line_text) > 30 or num_words > 6
-                
-                if too_long and num_words > 6:
-                    # Split into chunks and show as separate dialogue lines
-                    chunk_size = 4
-                    for chunk_start_idx in range(0, num_words, chunk_size):
-                        chunk = words[chunk_start_idx:chunk_start_idx + chunk_size]
-                        if not chunk:
-                            continue
-                        chunk_start = _format_time(chunk[0].start)
-                        chunk_end = _format_time(chunk[-1].end)
-                        # Each word gets its own Dialogue line — active word is highlighted
+                # MODE 2: line_highlight — full line visible, active word colored + bigger
+                # Split into chunks of max_words_per_line for readability
+                chunk_size = max_words_per_line
+                for chunk_start_idx in range(0, num_words, chunk_size):
+                    chunk = words[chunk_start_idx:chunk_start_idx + chunk_size]
+                    if not chunk:
+                        continue
+                    chunk_start = _format_time(chunk[0].start)
+                    chunk_end = _format_time(chunk[-1].end)
+                    chunk_dur = chunk[-1].end - chunk[0].start
+                    
+                    # Build the line: all words shown, active word gets color + scale
+                    # We emit ONE dialogue per chunk, with per-word \k timing + \kf fill
+                    # For each word: inactive = primary color, active = active color + scale
+                    # Use \kf (karaoke fill) for progress bar effect on the whole line
+                    
+                    if progress_bar:
+                        # Progress bar: a thin line under the text using \kf on a separator
+                        # The \kf tag fills the text from left to right over the word duration
+                        # We use it on the whole line text for the progress effect
+                        line_parts = []
+                        for w in chunk:
+                            w_dur_cs = max(1, int((w.end - w.start) * 100))
+                            line_parts.append(f"{{\\1c{primary}&}}\\kf{w_dur_cs}{{{active}\\fscx{active_scale}\\fscy{active_scale}}}{w.word}{{\\1c{primary}&\\fscx100\\fscy100}} ")
+                        line_text_ass = " ".join(line_parts).strip()
+                        events.append(
+                            f"Dialogue: 0,{chunk_start},{chunk_end},Default,,0,0,0,,"
+                            f"{line_text_ass}"
+                        )
+                    else:
+                        # Standard line_highlight: each word gets its own dialogue,
+                        # all words shown but only active is colored + scaled
+                        # We emit ONE dialogue per word, but with the FULL line text,
+                        # using \alpha to hide non-active words... 
+                        # Actually: simpler = one dialogue per word showing full line
+                        # with the active word highlighted via inline override.
                         for i, w in enumerate(chunk):
                             w_start = _format_time(w.start)
                             w_end = _format_time(w.end)
-                            effects = f"\\fscx{active_scale}\\fscy{active_scale}\\1c{active}&"
-                            if fade_in:
-                                effects = f"\\fade(255,255,0,0,{int((w.end - w.start) * 1000 / 3)},0,0){effects}"
+                            # Build full line: all words, active one gets color+scale
+                            parts = []
+                            for j, ww in enumerate(chunk):
+                                if j == i:
+                                    parts.append(f"{{\\1c{active}&\\fscx{active_scale}\\fscy{active_scale}}}{ww.word}{{\\1c{primary}&\\fscx100\\fscy100}}")
+                                else:
+                                    parts.append(ww.word)
+                            line_with_highlight = " ".join(parts)
                             events.append(
                                 f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
-                                f"{{{effects}}}{w.word}{{\\fscx100\\fscy100\\1c{primary}&}}"
+                                f"{line_with_highlight}"
                             )
-                else:
-                    # Each word gets its own Dialogue — only active word visible
-                    for w in words:
-                        w_start = _format_time(w.start)
-                        w_end = _format_time(w.end)
-                        effects = f"\\fscx{active_scale}\\fscy{active_scale}\\1c{active}&"
-                        if fade_in:
-                            effects = f"\\fade(255,255,0,0,{int((w.end - w.start) * 1000 / 3)},0,0){effects}"
-                        events.append(
-                            f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
-                            f"{{{effects}}}{w.word}{{\\fscx100\\fscy100\\1c{primary}&}}"
-                        )
     else:
         # Regular subtitles
         for sub in subtitles:

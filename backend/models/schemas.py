@@ -65,8 +65,9 @@ class SubtitleStyle(BaseModel):
     active_color: str = "&H00D7FF"  # yellow (active word highlight)
     outline_color: str = "&H00000000"  # black
     outline_width: int = 4
-    position: str = "bottom"  # bottom, center, top
+    position: str = "bottom"  # bottom, center, top, bottom_left, bottom_right
     margin_v: int = 80  # vertical margin from edge (px in 1080x1920 space)
+    margin_l: int = 60  # left/right margin (px in 1080x1920 space)
     bold: bool = True
 
 
@@ -84,8 +85,9 @@ class RenderTemplate(BaseModel):
     active_color: str
     outline_color: str
     outline_width: int
-    position: str
+    position: str  # bottom, center, top, bottom_left, bottom_right
     margin_v: int
+    margin_l: int = 60  # left margin (for bottom_left/right positions)
     bold: bool
     # Video rendering
     video_mode: str = "fit_blur"   # fit_blur, crop_fill, fit_blur_dark
@@ -98,6 +100,8 @@ class RenderTemplate(BaseModel):
     active_scale: int = 130    # % scale for active word (130 = 1.3x)
     glow_border: int = 0       # 0 = none, >0 = glow border width
     fade_in: bool = False      # fade in each word
+    max_words_per_line: int = 8  # max words per subtitle line (for line_highlight)
+    progress_bar: bool = False   # show progress bar under text (lyrics mode)
 
 
 TEMPLATES = [
@@ -125,20 +129,47 @@ TEMPLATES = [
         fade_in=False,
     ),
     RenderTemplate(
-        id="big_words",
-        name="Big Words",
-        description="Full-screen zoomed video, huge text, no black bars",
-        font="Oswald",
-        size=110,
+        id="lyrics",
+        name="Lyrics",
+        description="Clean line with up to 4 words, yellow active word + progress bar",
+        font="Montserrat",
+        size=72,
         primary_color="&H00FFFFFF",   # white
-        active_color="&H00FFE600",    # cyan (#00E5FF → BGR)
+        active_color="&H0017D6FF",    # gold (#FFD717 in RGB → BGR)
+        outline_color="&H00000000",   # black
+        outline_width=3,
+        position="bottom",
+        margin_v=180,
+        margin_l=120,                 # generous side margins for readability
+        bold=True,
+        video_mode="fit_blur",
+        blur_sigma=30,
+        dark_overlay=0.3,             # slight darkening for text contrast
+        scale_factor=1.0,
+        display_mode="line_highlight",
+        karaoke=True,
+        active_scale=115,             # subtle scale — line stays stable
+        glow_border=0,
+        fade_in=False,
+        max_words_per_line=4,
+        progress_bar=True,
+    ),
+    RenderTemplate(
+        id="hype",
+        name="Hype",
+        description="Single word bottom-left, full-screen video, pop-in animation",
+        font="Russo One",
+        size=96,
+        primary_color="&H00FFFFFF",   # white
+        active_color="&H0017D6FF",    # gold
         outline_color="&H00000000",   # black
         outline_width=5,
-        position="center",
-        margin_v=0,
+        position="bottom_left",
+        margin_v=160,
+        margin_l=80,
         bold=True,
-        video_mode="crop_fill",       # zoom to fill 9:16, no bars
-        blur_sigma=0,                 # no blur — full screen video
+        video_mode="crop_fill",       # full-screen 16:9→9:16
+        blur_sigma=0,
         dark_overlay=0.0,
         scale_factor=1.0,
         display_mode="single_word",
@@ -146,29 +177,8 @@ TEMPLATES = [
         active_scale=140,
         glow_border=0,
         fade_in=True,
-    ),
-    RenderTemplate(
-        id="neon_pop",
-        name="Neon Pop",
-        description="Clear video center, dark blurred background, neon glow",
-        font="Russo One",
-        size=85,
-        primary_color="&H00FFFFFF",   # white
-        active_color="&H0020D6E6",    # neon pink (#E6D620 → BGR)
-        outline_color="&H000A0A0A",   # near-black
-        outline_width=2,
-        position="center",
-        margin_v=200,
-        bold=True,
-        video_mode="fit_blur_dark",   # clear video + dark blurred bg
-        blur_sigma=50,
-        dark_overlay=0.55,
-        scale_factor=0.85,
-        display_mode="single_word",
-        karaoke=True,
-        active_scale=150,
-        glow_border=12,
-        fade_in=False,
+        max_words_per_line=1,
+        progress_bar=False,
     ),
 ]
 

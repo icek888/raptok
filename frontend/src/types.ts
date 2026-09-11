@@ -46,8 +46,9 @@ export interface SubtitleStyle {
   active_color: string;
   outline_color: string;
   outline_width: number;
-  position: 'bottom' | 'center' | 'top';
+  position: 'bottom' | 'center' | 'top' | 'bottom_left' | 'bottom_right';
   margin_v: number;
+  margin_l?: number;
   bold: boolean;
 }
 
@@ -122,6 +123,7 @@ export interface RenderTemplate {
   outline_width: number;
   position: string;
   margin_v: number;
+  margin_l?: number;
   bold: boolean;
   // Display
   display_mode: string;
@@ -134,6 +136,8 @@ export interface RenderTemplate {
   active_scale?: number;
   glow_border?: number;
   fade_in?: number;
+  max_words_per_line?: number;
+  progress_bar?: boolean;
 }
 
 // ─── Deep Track Analysis ───

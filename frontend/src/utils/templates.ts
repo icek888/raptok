@@ -38,8 +38,9 @@ export function applyTemplateToStyle(
     active_color: tmpl.active_color,
     outline_color: tmpl.outline_color,
     outline_width: tmpl.outline_width,
-    position: tmpl.position as 'bottom' | 'center' | 'top',
+    position: tmpl.position as 'bottom' | 'center' | 'top' | 'bottom_left' | 'bottom_right',
     margin_v: tmpl.margin_v,
+    margin_l: tmpl.margin_l ?? 60,
     bold: tmpl.bold,
   });
   onDisplayModeChange(tmpl.display_mode as 'auto' | 'line_highlight' | 'word_by_word' | 'single_word');
