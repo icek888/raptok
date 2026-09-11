@@ -475,54 +475,86 @@ export function AnalysisPanel({
               )}
             </div>
 
-            {/* Selected range overlay */}
+            {/* Selected range overlay — visual only, clicks fall through to waveform */}
             <div
-              className="absolute top-0 bottom-0 bg-purple-500/20 border-x-2 border-purple-400"
+              className="absolute top-0 bottom-0 bg-purple-500/20 border-x-2 border-purple-400 pointer-events-none"
               style={{
                 left: `${timeToX(rangeStart)}%`,
                 width: `${Math.max(0.5, timeToX(rangeEnd) - timeToX(rangeStart))}%`,
               }}
             />
 
-            {/* Start handle */}
+            {/* Start handle — visual line only (pointer-events: none so clicks fall through to waveform) */}
             <div
-              className="absolute top-0 bottom-0 w-1.5 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300 hover:w-2.5 transition-all"
-              style={{ left: `calc(${timeToX(rangeStart)}% - 3px)` }}
+              className="absolute top-0 bottom-0 w-0.5 bg-purple-400 z-10 pointer-events-none"
+              style={{ left: `calc(${timeToX(rangeStart)}% - 1px)` }}
+            />
+            {/* Start handle knob — the ONLY draggable part (top circle) */}
+            <div
+              className="absolute top-0 z-20 cursor-ew-resize group"
+              style={{ left: `calc(${timeToX(rangeStart)}% - 6px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'start')}
+              title="Drag to move start"
             >
-              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
+              <div className="w-3 h-3 bg-purple-400 rounded-full group-hover:bg-purple-300 group-hover:scale-125 transition-all shadow-md" />
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-0.5 h-[84px] bg-purple-400 group-hover:bg-purple-300 transition-colors" />
             </div>
 
-            {/* End handle */}
+            {/* End handle — visual line only */}
             <div
-              className="absolute top-0 bottom-0 w-1.5 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300 hover:w-2.5 transition-all"
-              style={{ left: `calc(${timeToX(rangeEnd)}% - 3px)` }}
+              className="absolute top-0 bottom-0 w-0.5 bg-purple-400 z-10 pointer-events-none"
+              style={{ left: `calc(${timeToX(rangeEnd)}% - 1px)` }}
+            />
+            {/* End handle knob — the ONLY draggable part */}
+            <div
+              className="absolute top-0 z-20 cursor-ew-resize group"
+              style={{ left: `calc(${timeToX(rangeEnd)}% - 6px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'end')}
+              title="Drag to move end"
             >
-              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
+              <div className="w-3 h-3 bg-purple-400 rounded-full group-hover:bg-purple-300 group-hover:scale-125 transition-all shadow-md" />
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-0.5 h-[84px] bg-purple-400 group-hover:bg-purple-300 transition-colors" />
             </div>
 
-            {/* Move handle — thin strip at top of range (drag to move segment) */}
+            {/* Move handle — thin strip at top of range, pointer-events:none except small grab knob in center */}
             <div
-              className="absolute top-0 h-1.5 cursor-grab z-5 hover:bg-purple-300/40 rounded-t transition-colors"
+              className="absolute top-0 h-1.5 z-5 pointer-events-none"
               style={{
                 left: `${timeToX(rangeStart)}%`,
                 width: `${Math.max(0.5, timeToX(rangeEnd) - timeToX(rangeStart))}%`,
+              }}
+            >
+              <div className="h-full bg-purple-400/30 rounded-t" />
+            </div>
+            {/* Move grab knob — centered on the segment, draggable */}
+            <div
+              className="absolute top-0 z-20 cursor-grab active:cursor-grabbing"
+              style={{
+                left: `calc(${timeToX((rangeStart + rangeEnd) / 2)}% - 12px)`,
               }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'move')}
               title="Drag to move segment"
-            />
+            >
+              <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-500/40 hover:bg-purple-500/60 rounded text-purple-300 text-[10px] font-medium transition">
+                ⠿
+              </div>
+            </div>
 
             {/* Silver seek cursor — draggable, sets playback position */}
+            {/* Silver seek cursor — line is visual only (pointer-events:none), knob is draggable */}
             <div
-              className="absolute top-0 bottom-0 z-25 cursor-ew-resize group"
+              className="absolute top-0 bottom-0 z-25 pointer-events-none"
               style={{ left: `${timeToX(seekCursor)}%` }}
-              onMouseDown={(e) => handleWaveformMouseDown(e, 'seek')}
             >
-              {/* Thin line */}
-              <div className="absolute top-0 bottom-0 w-0.5 bg-gray-300 group-hover:bg-gray-100 transition-colors" />
-              {/* Draggable handle (visible circle) */}
-              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-gray-300 group-hover:bg-white border border-gray-400 shadow-md transition-colors" />
+              <div className="absolute top-0 bottom-0 w-0.5 bg-gray-300" />
+            </div>
+            <div
+              className="absolute top-1/2 -translate-y-1/2 z-25 cursor-ew-resize group"
+              style={{ left: `calc(${timeToX(seekCursor)}% - 6px)` }}
+              onMouseDown={(e) => handleWaveformMouseDown(e, 'seek')}
+              title="Drag to seek"
+            >
+              <div className="w-3 h-3 rounded-full bg-gray-300 group-hover:bg-white border border-gray-400 shadow-md transition-colors" />
             </div>
 
             {/* Red playhead — 60fps smooth via rAF, always visible */}
@@ -617,7 +649,7 @@ export function AnalysisPanel({
           {/* Range info */}
           <div className="flex items-center justify-between text-sm">
             <span className="text-gray-400">
-              <span className="text-gray-300">Click waveform to play</span> · <span className="text-purple-400">Purple handles</span> = segment · <span className="text-red-400">Red line</span> = playing
+              <span className="text-gray-300">Click waveform to seek & play</span> · <span className="text-purple-400">⬤ handles</span> = drag segment edges · <span className="text-purple-300">⠿</span> = move segment · <span className="text-gray-400">◯</span> = seek · <span className="text-red-400">Red line</span> = playing
             </span>
             <span className="text-white font-bold">
               Clip length: <span className="text-purple-400">{clipLength.toFixed(1)}s</span>
