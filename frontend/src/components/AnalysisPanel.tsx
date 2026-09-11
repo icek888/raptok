@@ -28,6 +28,12 @@ export function AnalysisPanel({
   const [zoomLevel, setZoomLevel] = useState(1);  // 1 = full track, 20 = detailed
   const [zoomCenter, setZoomCenter] = useState(0); // center of viewport in seconds
   const [buffered, setBuffered] = useState(false);
+  const [loopSegment, setLoopSegment] = useState(true); // loop playback within selected segment
+  const loopRef = useRef({ loopSegment, rangeStart, rangeEnd });
+  // Keep ref in sync so rAF tick (created once) always sees fresh values
+  useEffect(() => {
+    loopRef.current = { loopSegment, rangeStart, rangeEnd };
+  }, [loopSegment, rangeStart, rangeEnd]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const waveformRef = useRef<HTMLDivElement>(null);
 
@@ -75,10 +81,24 @@ export function AnalysisPanel({
     if (!audio) return;
     let lastT = -1;
     const tick = () => {
+      const audio = audioRef.current;
+      if (!audio) { rafIdRef.current = requestAnimationFrame(tick); return; }
       const t = audio.currentTime;
-      if (t !== lastT) {
-        setPlayTime(t);
-        lastT = t;
+      const { loopSegment: lp, rangeStart: rs, rangeEnd: re } = loopRef.current;
+      // Loop segment: if playing past rangeEnd, jump back to rangeStart
+      if (lp && t >= re) {
+        audio.currentTime = rs;
+        setPlayTime(rs);
+        lastT = rs;
+      } else if (lp && t < rs - 0.05) {
+        audio.currentTime = rs;
+        setPlayTime(rs);
+        lastT = rs;
+      } else {
+        if (t !== lastT) {
+          setPlayTime(t);
+          lastT = t;
+        }
       }
       rafIdRef.current = requestAnimationFrame(tick);
     };
@@ -129,9 +149,14 @@ export function AnalysisPanel({
       stopRaf();
       setPlayTime(audio.currentTime);
     } else {
-      // Seek to seekCursor position before playing
-      if (Math.abs(audio.currentTime - seekCursor) > 0.1) {
-        audio.currentTime = seekCursor;
+      // If loop mode and cursor is outside segment, start from rangeStart
+      let startFrom = seekCursor;
+      if (loopSegment && (seekCursor < rangeStart - 0.05 || seekCursor >= rangeEnd)) {
+        startFrom = rangeStart;
+        setSeekCursor(rangeStart);
+      }
+      if (Math.abs(audio.currentTime - startFrom) > 0.1) {
+        audio.currentTime = startFrom;
       }
       const p = audio.play();
       if (p) {
@@ -147,6 +172,24 @@ export function AnalysisPanel({
         startRaf();
       }
     }
+  };
+
+  // Play only the selected segment (seeks to rangeStart, plays, stops at rangeEnd)
+  const playSegment = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      stopRaf();
+    }
+    audio.currentTime = rangeStart;
+    setSeekCursor(rangeStart);
+    setPlayTime(rangeStart);
+    audio.play().then(() => {
+      setIsPlaying(true);
+      startRaf();
+    }).catch((err) => console.error('Audio play failed:', err));
   };
 
   const seekTo = (t: number) => {
@@ -354,6 +397,24 @@ export function AnalysisPanel({
             >
               {isPlaying ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white ml-0.5" />}
             </button>
+            <button
+              onClick={playSegment}
+              className="px-3 h-9 rounded-lg bg-purple-600/20 border border-purple-500/30 hover:bg-purple-600/30 text-purple-300 text-xs font-medium transition flex items-center gap-1.5"
+              title="Play selected segment only"
+            >
+              <Play size={14} /> Segment
+            </button>
+            <button
+              onClick={() => setLoopSegment(!loopSegment)}
+              className={`px-3 h-9 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+                loopSegment
+                  ? 'bg-green-600/20 border border-green-500/40 text-green-300'
+                  : 'bg-[#1a1a2a] border border-[#2a2a3a] text-gray-500 hover:text-gray-300'
+              }`}
+              title="Loop playback within selected segment"
+            >
+              {loopSegment ? '🔁' : '➡️'} Loop
+            </button>
             <span className="text-gray-400 text-sm font-mono">{fmtTime(isPlaying ? playTime : seekCursor)}</span>
             {!buffered && <span className="text-xs text-yellow-500 animate-pulse">buffering...</span>}
             {buffered && <span className="text-xs text-green-500">● ready</span>}
@@ -425,8 +486,8 @@ export function AnalysisPanel({
 
             {/* Start handle */}
             <div
-              className="absolute top-0 bottom-0 w-2 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300"
-              style={{ left: `calc(${timeToX(rangeStart)}% - 4px)` }}
+              className="absolute top-0 bottom-0 w-1.5 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300 hover:w-2.5 transition-all"
+              style={{ left: `calc(${timeToX(rangeStart)}% - 3px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'start')}
             >
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
@@ -434,8 +495,8 @@ export function AnalysisPanel({
 
             {/* End handle */}
             <div
-              className="absolute top-0 bottom-0 w-2 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300"
-              style={{ left: `calc(${timeToX(rangeEnd)}% - 4px)` }}
+              className="absolute top-0 bottom-0 w-1.5 bg-purple-400 cursor-ew-resize z-10 hover:bg-purple-300 hover:w-2.5 transition-all"
+              style={{ left: `calc(${timeToX(rangeEnd)}% - 3px)` }}
               onMouseDown={(e) => handleWaveformMouseDown(e, 'end')}
             >
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-purple-400 rounded-full" />
