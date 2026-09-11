@@ -410,11 +410,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             else:
                 # MODE 2: line_highlight — full line visible, active word colored + bigger
                 # Split into chunks of max_words_per_line for readability
+                # But also check total character width — if too wide, split further
+                max_chars_per_line = 28  # ~28 chars fit at 72px on 1080px width
                 chunk_size = max_words_per_line
-                for chunk_start_idx in range(0, num_words, chunk_size):
-                    chunk = words[chunk_start_idx:chunk_start_idx + chunk_size]
+                chunks = []
+                i = 0
+                while i < num_words:
+                    chunk = words[i:i + chunk_size]
                     if not chunk:
+                        i += chunk_size
                         continue
+                    # Check total char count — if too long, reduce chunk size
+                    total_chars = sum(len(w.word) for w in chunk) + len(chunk) - 1  # +spaces
+                    if total_chars > max_chars_per_line and len(chunk) > 2:
+                        # Split in half
+                        half = len(chunk) // 2
+                        chunks.append(chunk[:half])
+                        chunks.append(chunk[half:])
+                    else:
+                        chunks.append(chunk)
+                    i += chunk_size
+                
+                for chunk in chunks:
                     chunk_start = _format_time(chunk[0].start)
                     chunk_end = _format_time(chunk[-1].end)
                     chunk_dur = chunk[-1].end - chunk[0].start
@@ -425,23 +442,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     # Use \kf (karaoke fill) for progress bar effect on the whole line
                     
                     if progress_bar:
-                        # Progress bar mode: one dialogue per chunk, \kf fills text left→right
-                        # \kf MUST be inside {} blocks — it applies to text that follows
-                        # Each word gets its own \kf duration (centiseconds)
-                        line_parts = []
-                        for w in chunk:
+                        # Progress bar mode: one dialogue per word (active changes per word)
+                        # Full line visible, active word = yellow + \kf fill, others = white
+                        for i, w in enumerate(chunk):
+                            w_start = _format_time(w.start)
+                            w_end = _format_time(w.end)
                             w_dur_cs = max(1, int((w.end - w.start) * 100))
-                            # \kf inside {} — fills this word's text over w_dur_cs
-                            line_parts.append(
-                                f"{{\\1c{primary}&\\kf{w_dur_cs}}}"
-                                f"{{\\1c{active}&\\fscx{active_scale}\\fscy{active_scale}}}{w.word}"
-                                f"{{\\1c{primary}&\\fscx100\\fscy100}} "
+                            parts = []
+                            for j, ww in enumerate(chunk):
+                                if j == i:
+                                    # Active word: yellow + scale + \kf progress fill
+                                    parts.append(f"{{\\1c{active}&\\fscx{active_scale}\\fscy{active_scale}\\kf{w_dur_cs}}}{ww.word}{{\\1c{primary}&\\fscx100\\fscy100}}")
+                                else:
+                                    parts.append(ww.word)
+                            line_with_highlight = " ".join(parts)
+                            events.append(
+                                f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,"
+                                f"{line_with_highlight}"
                             )
-                        line_text_ass = "".join(line_parts).strip()
-                        events.append(
-                            f"Dialogue: 0,{chunk_start},{chunk_end},Default,,0,0,0,,"
-                            f"{line_text_ass}"
-                        )
                     else:
                         # Standard line_highlight: one dialogue per word showing full line
                         # with the active word highlighted via inline override
