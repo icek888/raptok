@@ -122,15 +122,23 @@ def transcribe_audio(
     
     # Transcribe
     logger.info(f"WhisperX transcribing ({model_size or _model_size}): {audio_path}")
-    # Note: initial_prompt is logged but not passed to WhisperX —
-    # FasterWhisperPipeline doesn't accept it directly via this API.
-    # The prompt is still useful for debugging and could be passed via
-    # a different mechanism if needed.
+    # Pass initial_prompt to Whisper via TranscriptionOptions
+    # FasterWhisperPipeline.transcribe() doesn't accept initial_prompt as a kwarg,
+    # but self.options (TranscriptionOptions) has the field. We patch it before transcribe.
+    _orig_options = None
+    if initial_prompt:
+        from dataclasses import replace as _dc_replace
+        _orig_options = model.options
+        model.options = _dc_replace(model.options, initial_prompt=initial_prompt)
+        logger.info(f"Set initial_prompt on TranscriptionOptions: {initial_prompt[:80]}...")
     transcript = model.transcribe(
         audio_path,
         language=language if language != "auto" else None,
         batch_size=16 if _device != "cpu" else 8,
     )
+    # Restore original options (model is cached globally)
+    if _orig_options is not None:
+        model.options = _orig_options
     if language == "auto":
         lang_detected = transcript.get("language", "ru")
     
