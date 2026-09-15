@@ -35,9 +35,9 @@ export class WaveformRenderer {
     this.render();
   }
 
-  /** Force redraw (e.g. after zoom change) */
+  /** Force redraw (e.g. after zoom change) — deferred to next frame so DOM has updated */
   redraw(): void {
-    this.render();
+    requestAnimationFrame(() => this.render());
   }
 
   /** Main render — reads container width, sets canvas buffer, draws bars */

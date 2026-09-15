@@ -13,27 +13,32 @@ export default function TrimModal({ state, actions }: PanelProps) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Draw waveform on canvas
+  // Draw waveform on canvas — zoom expands the canvas width, bars stay same size
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !state.audioWaveform.length) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const W = canvas.width;
-    const H = canvas.height;
+
+    // Canvas buffer = base width × zoom — bars stay same pixel width, more visible
+    const baseW = 760;
+    const H = 120;
+    const W = Math.floor(baseW * zoom);
+    canvas.width = W;
+    canvas.height = H;
+
+    // Clear
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, W, H);
 
-    // Draw waveform bars
+    // Draw waveform bars — ALL bars, spread across full canvas width
     const bars = state.audioWaveform;
-    const visibleBars = Math.floor(bars.length * zoom);
-    const startBar = 0;
-    const barWidth = W / visibleBars;
+    const barWidth = W / bars.length;
     ctx.fillStyle = '#333';
-    for (let i = 0; i < visibleBars && i < bars.length; i++) {
+    for (let i = 0; i < bars.length; i++) {
       const x = i * barWidth;
-      const h = bars[startBar + i] * H * 0.8;
-      ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 1), h);
+      const h = bars[i] * H * 0.8;
+      ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 0.5), h);
     }
 
     // Draw selection region
@@ -45,12 +50,12 @@ export default function TrimModal({ state, actions }: PanelProps) {
 
     // Draw selection bars in cyan
     ctx.fillStyle = '#22d3ee';
-    for (let i = 0; i < visibleBars && i < bars.length; i++) {
-      const x = i * barWidth;
-      const barTime = (i / visibleBars) * dur;
+    for (let i = 0; i < bars.length; i++) {
+      const barTime = (i / bars.length) * dur;
       if (barTime >= state.trimStart && barTime <= state.trimEnd) {
-        const h = bars[startBar + i] * H * 0.8;
-        ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 1), h);
+        const x = i * barWidth;
+        const h = bars[i] * H * 0.8;
+        ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 0.5), h);
       }
     }
 
@@ -205,12 +210,13 @@ export default function TrimModal({ state, actions }: PanelProps) {
         {/* Waveform canvas */}
         {state.audioFile && (
           <>
-            <div className="relative mb-4">
+            <div className="relative mb-4 overflow-x-auto">
               <canvas
                 ref={canvasRef}
                 width={760}
                 height={120}
-                className="w-full rounded-lg cursor-pointer"
+                className="rounded-lg cursor-pointer"
+                style={{ display: 'block', width: `${760 * zoom}px`, height: '120px' }}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}

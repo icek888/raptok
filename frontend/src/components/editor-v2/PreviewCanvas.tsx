@@ -14,6 +14,9 @@ interface Props extends PanelProps {
 export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.3);
+  // Thumbnails: slotId → dataURL of video frame
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const thumbVideoRef = useRef<HTMLVideoElement | null>(null);
 
   // Calculate scale to fit container
   useEffect(() => {
@@ -30,6 +33,77 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     ro.observe(container);
     return () => ro.disconnect();
   }, []);
+
+  // Generate thumbnails for each slot's clip
+  useEffect(() => {
+    const slots = state.timelineSlots.filter(s => s.clipId);
+    if (slots.length === 0) {
+      setThumbnails({});
+      return;
+    }
+
+    // Create hidden video element for thumbnail generation
+    let video: HTMLVideoElement | null = thumbVideoRef.current;
+    if (!video) {
+      video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.playsInline = true;
+      thumbVideoRef.current = video;
+    }
+
+    const clips = state.clips;
+    const newThumbs: Record<string, string> = {};
+    let cancelled = false;
+
+    const generateThumbs = async () => {
+      // Unique clips (one thumb per unique clip)
+      const uniqueClips = new Map<string, string>(); // clipId → videoUrl
+      for (const slot of slots) {
+        if (slot.clipId && !uniqueClips.has(slot.clipId)) {
+          const clip = clips.find(c => c.id === slot.clipId);
+          if (clip?.videoUrl) uniqueClips.set(slot.clipId, clip.videoUrl);
+        }
+      }
+
+      for (const [clipId, url] of uniqueClips) {
+        if (cancelled) return;
+        try {
+          await new Promise<void>((resolve) => {
+            if (!video) return resolve();
+            video.src = url;
+            video.currentTime = 0.1; // grab frame near start
+            const onSeeked = () => {
+              if (!video || cancelled) return resolve();
+              try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 108;
+                canvas.height = 192; // 9:16 small thumb
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(video, 0, 0, 108, 192);
+                  newThumbs[clipId] = canvas.toDataURL('image/jpeg', 0.7);
+                }
+              } catch (e) {
+                // CORS or other error — skip
+              }
+              resolve();
+            };
+            const onError = () => resolve(); // skip on error
+            video.addEventListener('seeked', onSeeked, { once: true });
+            video.addEventListener('error', onError, { once: true });
+            setTimeout(() => resolve(), 3000); // timeout fallback
+          });
+        } catch (e) {
+          // skip
+        }
+      }
+      if (!cancelled) setThumbnails(newThumbs);
+    };
+
+    generateThumbs();
+    return () => { cancelled = true; };
+  }, [state.timelineSlots, state.clips]);
 
   // Words are in absolute time, currentTime is absolute
   const currentWordIdx = state.words.findIndex(
@@ -225,8 +299,56 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
             </div>
           )}
 
-          {/* No clip but has audio */}
-          {state.audioUrl && !activeClip?.videoUrl && (
+          {/* No clip but has audio — show video grid storyboard */}
+          {state.audioUrl && !activeClip?.videoUrl && state.timelineSlots.length > 0 && (
+            <div className="absolute inset-0 flex items-center justify-center z-5">
+              <div
+                className="grid gap-2 p-4"
+                style={{
+                  gridTemplateColumns: state.timelineSlots.length <= 2 ? '1fr' : '1fr 1fr',
+                  maxWidth: `${CANVAS_W - 80}px`,
+                }}
+              >
+                {state.timelineSlots.slice(0, 4).map((slot, i) => {
+                  const clip = slot.clipId ? state.clips.find(c => c.id === slot.clipId) : null;
+                  const thumb = clip ? thumbnails[clip.id] : null;
+                  return (
+                    <div
+                      key={slot.id}
+                      className="relative rounded-lg overflow-hidden border-2"
+                      style={{
+                        width: `${CANVAS_W * 0.28}px`,
+                        height: `${CANVAS_H * 0.28}px`,
+                        borderColor: slot.id === activeSlot?.id ? '#3b82f6' : '#333',
+                      }}
+                    >
+                      {thumb ? (
+                        <img src={thumb} alt={`Slot ${i+1}`} className="w-full h-full object-cover" />
+                      ) : clip?.videoUrl ? (
+                        <div className="w-full h-full bg-neutral-900 flex items-center justify-center">
+                          <span style={{ fontSize: '24px' }}>⏳</span>
+                        </div>
+                      ) : (
+                        <div className="w-full h-full bg-neutral-900 flex items-center justify-center">
+                          <span style={{ fontSize: '32px', color: '#333' }}>📹</span>
+                        </div>
+                      )}
+                      {/* Slot label */}
+                      <div
+                        className="absolute bottom-1 left-1 px-2 py-0.5 rounded text-white"
+                        style={{ fontSize: '14px', background: 'rgba(0,0,0,0.6)' }}
+                      >
+                        #{i+1} · {slot.end - slot.start}s
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* No clip and no slots */}
+          {state.audioUrl && !activeClip?.videoUrl && state.timelineSlots.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center space-y-4" style={{ color: '#555', fontSize: '48px' }}>
                 <p style={{ fontSize: '96px' }}>🎵</p>
@@ -259,7 +381,47 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
             </div>
           )}
 
-          {/* Vignette */}
+          {/* Video grid storyboard — shown when paused, has slots with clips */}
+          {state.audioUrl && activeClip?.videoUrl && !state.isPlaying && state.timelineSlots.length > 1 && (
+            <div className="absolute inset-0 flex items-center justify-center z-25 pointer-events-none">
+              <div
+                className="grid gap-2 p-4 bg-black/60 rounded-xl"
+                style={{
+                  gridTemplateColumns: state.timelineSlots.length <= 2 ? '1fr' : '1fr 1fr',
+                }}
+              >
+                {state.timelineSlots.slice(0, 4).map((slot, i) => {
+                  const clip = slot.clipId ? state.clips.find(c => c.id === slot.clipId) : null;
+                  const thumb = clip ? thumbnails[clip.id] : null;
+                  return (
+                    <div
+                      key={slot.id}
+                      className="relative rounded-lg overflow-hidden border-2"
+                      style={{
+                        width: `${CANVAS_W * 0.25}px`,
+                        height: `${CANVAS_H * 0.25}px`,
+                        borderColor: slot.id === activeSlot?.id ? '#3b82f6' : '#444',
+                      }}
+                    >
+                      {thumb ? (
+                        <img src={thumb} alt={`Slot ${i+1}`} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-neutral-800 flex items-center justify-center">
+                          <span style={{ fontSize: '24px', color: '#555' }}>📹</span>
+                        </div>
+                      )}
+                      <div
+                        className="absolute bottom-1 left-1 px-2 py-0.5 rounded text-white"
+                        style={{ fontSize: '12px', background: 'rgba(0,0,0,0.7)' }}
+                      >
+                        #{i+1} · {(slot.end - slot.start).toFixed(1)}s
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {state.effects.vignette && (
             <div
               className="absolute inset-0 pointer-events-none z-20"
