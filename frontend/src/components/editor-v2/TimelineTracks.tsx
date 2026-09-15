@@ -120,7 +120,6 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
   }, [dragState, state.words, state.trimStart, dur, xToTime, actions]);
 
   // --- Issue 3: Redraw waveform canvas to match the zoomed container width ---
-  // The canvas must use the SAME width as the container (widthPct), not offsetWidth.
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -128,8 +127,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
     const draw = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      // Use the container's actual rendered width (which follows widthPct)
-      const W = (canvas.width = container.offsetWidth);
+      const inner = container.querySelector('[style*="widthPct"]') || container.firstElementChild || container;
+      const W = (canvas.width = (inner as HTMLElement).offsetWidth);
       const H = (canvas.height = canvas.offsetHeight);
       ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, W, H);
@@ -144,7 +143,10 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
       }
     };
     draw();
-    // Redraw on zoom change (container width changes) and waveform change
+    // Redraw on zoom change and waveform change
+    const ro = new ResizeObserver(draw);
+    ro.observe(container);
+    return () => ro.disconnect();
   }, [zoom, state.audioWaveform, widthPct]);
 
   return (
@@ -351,12 +353,11 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform — canvas uses same widthPct as other tracks */}
+          {/* Track 3: Audio waveform — canvas sized to match inner widthPct div */}
           <div className="absolute top-[120px] left-0 h-[60px]" style={{ width: '100%' }}>
             <canvas
               ref={canvasRef}
               className="h-full block"
-              style={{ width: '100%' }}
             />
           </div>
 
