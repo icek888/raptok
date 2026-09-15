@@ -180,8 +180,23 @@ export function useEditorState() {
     }
   }, [addClip]);
 
-  const generateSlots = useCallback(() => {
-    if (state.bpm === 0 || state.trimmedDuration === 0) return;
+  const generateSlots = useCallback((count?: number) => {
+    if (state.trimmedDuration === 0) return;
+    // If count is provided, create N equal slots regardless of BPM
+    if (count && count > 0) {
+      const slotDur = state.trimmedDuration / count;
+      const slots: TimelineSlot[] = Array.from({ length: count }, (_, i) => ({
+        id: `slot-${i}`,
+        clipId: null,
+        start: i * slotDur,
+        end: (i + 1) * slotDur,
+        wordIndices: [],
+      }));
+      update('timelineSlots', slots);
+      return;
+    }
+    // Otherwise use BPM
+    if (state.bpm === 0) return;
     const beatDuration = 60 / state.bpm;
     const slotCount = Math.floor(state.trimmedDuration / beatDuration);
     const slots: TimelineSlot[] = Array.from({ length: slotCount }, (_, i) => ({

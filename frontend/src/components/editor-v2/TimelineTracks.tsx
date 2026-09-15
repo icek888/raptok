@@ -12,6 +12,7 @@ type DragMode = 'move' | 'resize-left' | 'resize-right' | null;
 export default function TimelineTracks({ state, actions, videoRef, audioRef }: Props) {
   const [zoom, setZoom] = useState(1);
   const [editingWordIdx, setEditingWordIdx] = useState<number | null>(null);
+  const [slotCountInput, setSlotCountInput] = useState(0); // 0 = use BPM
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dur = state.trimmedDuration || 1;
@@ -158,9 +159,19 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         </button>
         {state.bpm > 0 && <span className="text-neutral-400">{state.bpm} BPM</span>}
         <span className="text-neutral-500">Cuts: {state.timelineSlots.length}/{slotCount}</span>
+        <input
+          type="number"
+          min="0"
+          max="50"
+          value={slotCountInput || ''}
+          placeholder="BPM"
+          onChange={e => setSlotCountInput(Math.max(0, +e.target.value))}
+          className="w-12 px-1 py-0.5 text-[10px] bg-neutral-800 text-neutral-300 rounded border border-neutral-700 text-center"
+          title="0 = use BPM, or enter slot count"
+        />
         <button
-          onClick={() => actions.generateSlots()}
-          disabled={state.bpm === 0}
+          onClick={() => actions.generateSlots(slotCountInput || undefined)}
+          disabled={state.bpm === 0 && !slotCountInput}
           className="px-2 py-0.5 text-[10px] bg-neutral-800 hover:bg-neutral-700 text-neutral-400 rounded disabled:opacity-50"
         >
           Gen Slots
@@ -188,8 +199,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         onClick={handleTimelineClick}
       >
         <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words — auto-sized cards, draggable + editable + resize/move (Issue 2) */}
-          <div className="absolute top-0 left-0 right-0 h-[36px] border-b border-neutral-800">
+          {/* Track 1: Words */}
+          <div className="absolute top-0 left-0 h-[36px] border-b border-neutral-800" style={{ width: '100%' }}>
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
               const relEnd = w.end - state.trimStart;
@@ -278,8 +289,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             })}
           </div>
 
-          {/* Track 1.5: Cut markers (beat lines) */}
-          <div className="absolute top-[36px] left-0 right-0 h-[2px]">
+          {/* Track 1.5: Cut markers */}
+          <div className="absolute top-[36px] left-0 h-[2px]" style={{ width: '100%' }}>
             {state.bpm > 0 && Array.from({ length: slotCount }).map((_, i) => {
               const t = i * beatDuration;
               const left = timeToX(t, 100);
@@ -294,7 +305,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
           </div>
 
           {/* Track 2: Clip slots */}
-          <div className="absolute top-[40px] left-0 right-0 h-[76px] border-b border-neutral-800">
+          <div className="absolute top-[40px] left-0 h-[76px] border-b border-neutral-800" style={{ width: '100%' }}>
             {state.timelineSlots.map((slot, i) => {
               const left = timeToX(slot.start, 100);
               const width = Math.max(20, ((slot.end - slot.start) / dur) * 100 * zoom);
@@ -340,11 +351,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform — canvas uses container width (Issue 3) */}
-          <div className="absolute top-[120px] left-0 right-0 h-[60px]">
+          {/* Track 3: Audio waveform — canvas uses same widthPct as other tracks */}
+          <div className="absolute top-[120px] left-0 h-[60px]" style={{ width: '100%' }}>
             <canvas
               ref={canvasRef}
-              className="w-full h-full"
+              className="h-full block"
+              style={{ width: '100%' }}
             />
           </div>
 
