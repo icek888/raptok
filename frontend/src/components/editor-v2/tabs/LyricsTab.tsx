@@ -122,7 +122,7 @@ Words will be distributed evenly across the trimmed segment."
                 onClick={() => actions.selectWord(i)}
               >
                 <span className="text-neutral-600 w-12 text-[10px] shrink-0">
-                  {w.start.toFixed(1)}s
+                  {(w.start - state.trimStart).toFixed(1)}s
                 </span>
                 <input
                   type="text"

@@ -80,7 +80,7 @@ export default function EditorView() {
 
       {/* Bottom: Timeline */}
       <div className="h-[220px] shrink-0 border-t border-neutral-800">
-        <TimelineTracks {...props} videoRef={videoRef} />
+        <TimelineTracks {...props} videoRef={videoRef} audioRef={audioRef} />
       </div>
 
       {/* Trim Modal */}

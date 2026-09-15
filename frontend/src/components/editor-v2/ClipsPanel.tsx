@@ -154,17 +154,30 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
 
       {/* Bottom bar */}
       <div className="border-t border-neutral-800 px-3 py-2 space-y-2">
-        <p className="text-xs text-neutral-500">{shufflable} shufflable</p>
+        <p className="text-xs text-neutral-500">
+          {state.clips.length} clips · {state.timelineSlots.length} slots · {shufflable} shufflable
+        </p>
         <div className="flex gap-2">
           <button
-            onClick={() => actions.fillSlots()}
+            onClick={() => {
+              if (state.timelineSlots.length === 0) {
+                alert('No slots! Click "Gen Slots" first to generate timeline from BPM.');
+                return;
+              }
+              actions.fillSlots();
+              const filled = state.timelineSlots.filter(s => !s.clipId).length;
+              alert(`Filled ${filled} empty slots with ${state.clips.length} clips.`);
+            }}
             disabled={state.clips.length === 0}
             className="flex-1 py-1.5 text-xs bg-cyan-500 hover:bg-cyan-400 disabled:bg-neutral-800 disabled:text-neutral-600 text-black font-medium rounded"
           >
             FILL
           </button>
           <button
-            onClick={() => actions.shuffleSlots()}
+            onClick={() => {
+              actions.shuffleSlots();
+              alert(`Shuffled ${shufflable} clips across ${state.timelineSlots.length} slots.`);
+            }}
             disabled={shufflable === 0}
             className="flex-1 py-1.5 text-xs bg-neutral-800 hover:bg-neutral-700 disabled:text-neutral-600 text-neutral-300 rounded"
           >

@@ -4,33 +4,38 @@ import type { RefObject } from 'react';
 
 interface Props extends PanelProps {
   videoRef: RefObject<HTMLVideoElement | null>;
+  audioRef: RefObject<HTMLAudioElement | null>;
 }
 
-export default function TimelineTracks({ state, actions, videoRef }: Props) {
+export default function TimelineTracks({ state, actions, videoRef, audioRef }: Props) {
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const dur = state.trimmedDuration || 1;
 
-  // Time → pixel position
+  // Time → pixel position (relative to trimmed segment, not full track)
   const timeToX = useCallback((t: number, width: number) => {
     return (t / dur) * width * zoom;
   }, [dur, zoom]);
 
-  // Pixel → time
+  // Pixel → time (relative to trimmed segment)
   const xToTime = useCallback((x: number, width: number) => {
     return (x / (width * zoom)) * dur;
   }, [dur, zoom]);
 
-  // Handle playhead drag
+  // Handle playhead drag — click on timeline to seek
   const handleTimelineClick = (e: React.MouseEvent) => {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const x = e.clientX - rect.left + container.scrollLeft;
-    const time = xToTime(x, rect.width);
-    actions.seek(Math.max(0, Math.min(time, dur)));
+    const relTime = xToTime(x, rect.width);
+    const absTime = state.trimStart + Math.max(0, Math.min(relTime, dur));
+    actions.seek(absTime);
+    if (audioRef?.current) {
+      audioRef.current.currentTime = absTime;
+    }
     if (videoRef.current) {
-      videoRef.current.currentTime = time;
+      videoRef.current.currentTime = Math.max(0, relTime);
     }
   };
 
@@ -71,7 +76,7 @@ export default function TimelineTracks({ state, actions, videoRef }: Props) {
             className="w-20 accent-cyan-500"
           />
           <span className="text-neutral-400 w-8">{zoom.toFixed(1)}×</span>
-          <span className="text-neutral-500 ml-2">{fmtTime(state.currentTime)}</span>
+          <span className="text-neutral-500 ml-2">{fmtTime(state.currentTime - state.trimStart)}</span>
         </div>
       </div>
 
@@ -199,7 +204,7 @@ export default function TimelineTracks({ state, actions, videoRef }: Props) {
           {/* Playhead (vertical line across all tracks) */}
           <div
             className="absolute top-0 bottom-0 w-[2px] bg-cyan-400 pointer-events-none z-30"
-            style={{ left: `${timeToX(state.currentTime, 100)}%` }}
+            style={{ left: `${timeToX(state.currentTime - state.trimStart, 100)}%` }}
           />
         </div>
       </div>

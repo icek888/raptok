@@ -8,14 +8,14 @@ interface Props extends PanelProps {
 }
 
 export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Props) {
-  // Find current word — words are in absolute time, currentTime is absolute too
+  // Words are in absolute time, currentTime is absolute too
   const currentWordIdx = state.words.findIndex(
     w => state.currentTime >= w.start && state.currentTime < w.end
   );
   const currentWord = currentWordIdx >= 0 ? state.words[currentWordIdx] : null;
 
-  // Relative time for timeline slots (slots are 0-based from trimStart)
-  const relTime = state.currentTime - state.trimStart;
+  // Relative time for display and timeline slots
+  const relTime = Math.max(0, state.currentTime - state.trimStart);
 
   // Calculate lyrics position
   const posTop = state.style.position === 'top' ? '10%'
@@ -30,7 +30,7 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
   const fxScale = state.effects.zoom ? 1 + state.effects.intensity * 0.05 : 1;
   const fxRotate = state.effects.shake ? state.effects.intensity * 2 : 0;
 
-  // Find currently active clip from timeline
+  // Find currently active clip from timeline (slots are 0-based from trimStart)
   const activeSlot = state.timelineSlots.find(
     s => relTime >= s.start && relTime < s.end
   );
@@ -40,18 +40,32 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
 
   // Sync play/pause to video + audio elements
   useEffect(() => {
-    const video = videoRef.current;
     const audio = audioRef.current;
-    if (!video && !audio) return;
+    const video = videoRef.current;
+    if (!audio && !video) return;
 
     if (state.isPlaying) {
+      // Ensure audio starts at trimStart if outside range
+      if (audio) {
+        if (audio.currentTime < state.trimStart || audio.currentTime >= state.trimEnd) {
+          audio.currentTime = state.trimStart;
+        }
+        audio.play().catch(() => {});
+      }
       video?.play().catch(() => {});
-      audio?.play().catch(() => {});
     } else {
-      video?.pause();
       audio?.pause();
+      video?.pause();
     }
   }, [state.isPlaying]);
+
+  // Stop at trimEnd
+  useEffect(() => {
+    if (!state.isPlaying) return;
+    if (state.currentTime >= state.trimEnd) {
+      actions.pause();
+    }
+  }, [state.currentTime, state.trimEnd, state.isPlaying, actions]);
 
   // When clip changes, set video source
   useEffect(() => {
@@ -63,15 +77,27 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     }
   }, [activeClip?.id, activeClip?.videoUrl]);
 
-  const handleTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const t = e.currentTarget.currentTime;
-    actions.seek(state.trimStart + t);
-  }, [actions, state.trimStart]);
-
   const handleAudioTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
     const t = e.currentTarget.currentTime;
-    actions.seek(state.trimStart + t);
+    actions.seek(t);
+    // Stop at trimEnd
+    if (t >= state.trimEnd) {
+      e.currentTarget.pause();
+      actions.pause();
+    }
+  }, [actions, state.trimEnd]);
+
+  const handleVideoTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    // Video is relative (starts at 0), add trimStart for absolute
+    actions.seek(state.trimStart + e.currentTarget.currentTime);
   }, [actions, state.trimStart]);
+
+  // Format time as M:SS
+  const fmtTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2, '0')}`;
+  };
 
   return (
     <div className="relative flex flex-col items-center justify-center h-full w-full">
@@ -110,7 +136,7 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
               objectFit: state.framing === 'fit' ? 'contain' : 'cover',
               transform: `scale(${state.canvasPosition.scale * fxScale}) rotate(${state.canvasPosition.rotation + fxRotate}deg)`,
             }}
-            onTimeUpdate={handleTimeUpdate}
+            onTimeUpdate={handleVideoTimeUpdate}
             onEnded={() => actions.pause()}
             onClick={() => (state.isPlaying ? actions.pause() : actions.play())}
             playsInline
@@ -125,12 +151,11 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
             src={state.audioUrl}
             onTimeUpdate={handleAudioTimeUpdate}
             onEnded={() => actions.pause()}
-            // Start from trimStart
           />
         )}
 
-        {/* Empty state — no clip and no audio */}
-        {!activeClip?.videoUrl && !state.audioUrl && (
+        {/* Empty state — no audio */}
+        {!state.audioUrl && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center text-neutral-600 text-sm space-y-2">
               <p className="text-2xl">🎬</p>
@@ -199,9 +224,9 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
           {state.isPlaying ? '⏸' : '▶'}
         </button>
         <span>
-          {Math.floor(relTime / 60)}:{String(Math.floor(relTime % 60)).padStart(2, '0')}
+          {fmtTime(relTime)}
           {' / '}
-          {Math.floor(state.trimmedDuration / 60)}:{String(Math.floor(state.trimmedDuration % 60)).padStart(2, '0')}
+          {fmtTime(state.trimmedDuration)}
         </span>
         <span className="ml-2 px-2 py-0.5 bg-neutral-800 rounded text-neutral-500">9:16</span>
       </div>

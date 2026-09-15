@@ -144,10 +144,12 @@ export function useEditorState() {
   const setEffects = useCallback((partial: Partial<EditorEffects>) => setState(prev => ({ ...prev, effects: { ...prev.effects, ...partial } })), []);
   const setVisuals = useCallback((partial: Partial<Pick<EditorState, 'framing' | 'background' | 'canvasPosition'>>) => setState(prev => ({ ...prev, ...partial })), []);
   const play = useCallback(() => {
-    // If at start, seek to trimStart
     const audio = audioRef.current;
-    if (audio && (state.currentTime < state.trimStart || state.currentTime >= state.trimEnd)) {
-      audio.currentTime = state.trimStart;
+    if (audio) {
+      // If outside trim range, seek to trimStart
+      if (state.currentTime < state.trimStart || state.currentTime >= state.trimEnd) {
+        audio.currentTime = state.trimStart;
+      }
     }
     update('isPlaying', true);
   }, [update, state.currentTime, state.trimStart, state.trimEnd]);
