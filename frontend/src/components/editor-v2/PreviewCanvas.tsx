@@ -61,7 +61,7 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     ? state.clips.find(c => c.id === activeSlot.clipId)
     : null;
 
-  // Sync play/pause
+  // Sync play/pause — audio is the master timeline, video follows
   useEffect(() => {
     const audio = audioRef.current;
     const video = videoRef.current;
@@ -88,22 +88,20 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     }
   }, [state.currentTime, state.trimEnd, state.isPlaying, actions]);
 
-  // When active clip changes, set video source and reset
+  // When active CLIP changes (different video source), set video src and reset
+  // But do NOT reset when only the slot changes (same clip in multiple slots)
+  const activeClipIdRef = useRef<string | null>(null);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (activeClip?.videoUrl && video.src !== activeClip.videoUrl) {
+    if (activeClip?.videoUrl && activeClipIdRef.current !== activeClip.id) {
+      activeClipIdRef.current = activeClip.id;
       video.src = activeClip.videoUrl;
       video.currentTime = 0;
+      video.loop = true; // loop within slot, don't stop
+      if (state.isPlaying) video.play().catch(() => {});
     }
-  }, [activeClip?.id, activeClip?.videoUrl]);
-
-  // Reset video to start when slot changes
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !activeClip?.videoUrl) return;
-    video.currentTime = 0;
-  }, [activeSlot?.id]);
+  }, [activeClip?.id, activeClip?.videoUrl, state.isPlaying]);
 
   const handleAudioTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
     const t = e.currentTarget.currentTime;
@@ -114,9 +112,8 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     }
   }, [actions, state.trimEnd]);
 
-  const handleVideoTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
-    actions.seek(state.trimStart + e.currentTarget.currentTime);
-  }, [actions, state.trimStart]);
+  // Video does NOT update state.currentTime — audio is the master timeline
+  // Video just follows audio's time via its own onTimeUpdate being ignored
 
   const fmtTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -178,11 +175,11 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
                 transform: `scale(${state.canvasPosition.scale * fxScale}) rotate(${state.canvasPosition.rotation + fxRotate}deg)`,
                 transformOrigin: 'center',
               }}
-              onTimeUpdate={handleVideoTimeUpdate}
-              onEnded={() => actions.pause()}
+              onEnded={() => { /* video loops, no action needed */ }}
               onClick={() => (state.isPlaying ? actions.pause() : actions.play())}
               playsInline
               muted
+              loop
             />
           )}
 
