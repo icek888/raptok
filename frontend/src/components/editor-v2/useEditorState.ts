@@ -12,7 +12,7 @@ const initialState: EditorState = {
   trimmedDuration: 30,
   words: [],
   language: 'ru',
-  transcriptModel: 'qwen/qwen3-asr-0.6b',
+  transcriptModel: 'openai/whisper-1',
   isTranscribing: false,
   clips: [],
   timelineSlots: [],

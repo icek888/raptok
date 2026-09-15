@@ -24,7 +24,7 @@ def _detect_format(audio_path: str) -> str:
 
 async def transcribe_via_openrouter(
     audio_path: str,
-    model: str = "qwen/qwen3-asr-0.6b",
+    model: str = "openai/whisper-1",
     language: str = "ru",
 ) -> dict:
     """
