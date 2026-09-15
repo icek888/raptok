@@ -49,13 +49,13 @@ export default function StyleTab({ state, actions }: TabProps) {
           <label className="text-xs text-neutral-500 w-16">Size</label>
           <input
             type="range"
-            min="12"
-            max="96"
+            min="24"
+            max="200"
             value={s.fontSize}
             onChange={e => actions.setStyle({ fontSize: +e.target.value })}
             className="flex-1 accent-cyan-500"
           />
-          <span className="text-xs text-neutral-400 w-8">{s.fontSize}px</span>
+          <span className="text-xs text-neutral-400 w-12">{s.fontSize}px</span>
         </div>
         <div className="flex items-center gap-2">
           <label className="text-xs text-neutral-500 w-16">Weight</label>

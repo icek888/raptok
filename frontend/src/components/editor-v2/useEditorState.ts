@@ -21,7 +21,7 @@ const initialState: EditorState = {
   canvasPosition: { x: 50, y: 50, scale: 1, rotation: 0 },
   style: {
     fontFamily: 'Arial',
-    fontSize: 48,
+    fontSize: 96,  // canvas px (1080×1920) — real output size
     fontWeight: 700,
     color: '#ffffff',
     highlightColor: '#22d3ee',
