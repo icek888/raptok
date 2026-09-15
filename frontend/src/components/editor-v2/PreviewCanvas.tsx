@@ -88,20 +88,40 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     }
   }, [state.currentTime, state.trimEnd, state.isPlaying, actions]);
 
-  // When active CLIP changes (different video source), set video src and reset
-  // But do NOT reset when only the slot changes (same clip in multiple slots)
+  // When active SLOT changes, reset video to beginning.
+  // When active CLIP changes (different source), load new video src.
+  // Video loops within slot if clip is shorter than slot.
+  const prevSlotIdRef = useRef<string | null>(null);
   const activeClipIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (activeClip?.videoUrl && activeClipIdRef.current !== activeClip.id) {
+
+    if (!activeClip?.videoUrl) {
+      prevSlotIdRef.current = null;
+      activeClipIdRef.current = null;
+      return;
+    }
+
+    const slotChanged = prevSlotIdRef.current !== activeSlot?.id;
+    const clipChanged = activeClipIdRef.current !== activeClip.id;
+
+    if (slotChanged || clipChanged) {
+      prevSlotIdRef.current = activeSlot?.id ?? null;
       activeClipIdRef.current = activeClip.id;
-      video.src = activeClip.videoUrl;
+
+      // Load new source if clip changed
+      if (clipChanged) {
+        video.src = activeClip.videoUrl;
+      }
+      // Always reset to beginning on slot change
       video.currentTime = 0;
-      video.loop = true; // loop within slot, don't stop
+      video.loop = true; // loop within slot if clip is short
+
       if (state.isPlaying) video.play().catch(() => {});
     }
-  }, [activeClip?.id, activeClip?.videoUrl, state.isPlaying]);
+  }, [activeSlot?.id, activeClip?.id, activeClip?.videoUrl, state.isPlaying]);
 
   const handleAudioTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
     const t = e.currentTarget.currentTime;
