@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useEditorState } from './useEditorState';
 import ClipsPanel from './ClipsPanel';
 import PreviewCanvas from './PreviewCanvas';
 import EditorTabs from './EditorTabs';
 import TimelineTracks from './TimelineTracks';
 import TrimModal from './TrimModal';
+import ExportModal from './ExportModal';
 import type { EditorState } from './types';
 import type { EditorActions } from './useEditorState';
 
@@ -16,6 +18,7 @@ export default function EditorView() {
   const editor = useEditorState();
   const { state, actions, videoRef, audioRef } = editor;
   const props: PanelProps = { state, actions };
+  const [showExport, setShowExport] = useState(false);
 
   return (
     <div className="flex flex-col h-screen bg-neutral-950 text-neutral-100 overflow-hidden select-none">
@@ -38,7 +41,10 @@ export default function EditorView() {
           <a href="/" className="px-3 py-1 text-xs text-neutral-500 hover:text-neutral-300">
             ← Wizard
           </a>
-          <button className="px-3 py-1 text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded">
+          <button
+            onClick={() => setShowExport(true)}
+            className="px-3 py-1 text-xs bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded"
+          >
             Export
           </button>
         </div>
@@ -85,6 +91,9 @@ export default function EditorView() {
 
       {/* Trim Modal */}
       {state.isTrimModalOpen && <TrimModal {...props} />}
+
+      {/* Export Modal */}
+      {showExport && <ExportModal state={state} actions={actions} onClose={() => setShowExport(false)} />}
     </div>
   );
 }
