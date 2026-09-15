@@ -3,11 +3,51 @@ import os
 import httpx
 import logging
 import asyncio
+import re
 
 logger = logging.getLogger(__name__)
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_STT_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+
+# Known hallucination patterns from Whisper on silence/music
+HALLUCINATION_PATTERNS = [
+    "субтитры", "сделал", "dimatorzok", "продолжение следует",
+    "звук", "спасибо за просмотр", "подписывайтесь",
+    "thank you for watching", "please subscribe",
+]
+
+
+def _is_hallucination(text: str) -> bool:
+    """Check if transcribed text looks like a Whisper hallucination."""
+    if not text or not text.strip():
+        return True
+    lower = text.lower().strip()
+    # If all words are from hallucination patterns
+    words_in_text = [w for w in lower.split() if w]
+    if not words_in_text:
+        return True
+    matches = sum(1 for w in words_in_text if any(pat in w for pat in HALLUCINATION_PATTERNS))
+    return matches >= len(words_in_text) * 0.5  # 50%+ words are hallucination patterns
+
+
+def _filter_words(words: list) -> list:
+    """Filter out words with zero-duration or overlapping timestamps."""
+    filtered = []
+    for w in words:
+        start = float(w.get("start", 0))
+        end = float(w.get("end", 0))
+        word = w.get("word", "").strip()
+        if not word:
+            continue
+        # Skip zero-duration words (likely hallucination artifacts)
+        if end <= start and end == start:
+            continue
+        # Ensure end > start
+        if end <= start:
+            end = start + 0.1
+        filtered.append({"word": word, "start": start, "end": end})
+    return filtered
 
 
 async def transcribe_via_openrouter(
@@ -50,8 +90,9 @@ async def transcribe_via_openrouter(
             response.raise_for_status()
             resp_data = response.json()
 
-    # Parse word-level timestamps from verbose_json response
+    # Parse word-level timestamps
     words = []
+    # Try segments first
     for seg in resp_data.get("segments", []):
         for w in seg.get("words", []):
             words.append({
@@ -60,7 +101,7 @@ async def transcribe_via_openrouter(
                 "end": float(w.get("end", 0)),
             })
 
-    # Fallback: if no segments with words, try top-level words
+    # Fallback: top-level words
     if not words and "words" in resp_data:
         for w in resp_data["words"]:
             words.append({
@@ -68,6 +109,15 @@ async def transcribe_via_openrouter(
                 "start": float(w.get("start", 0)),
                 "end": float(w.get("end", 0)),
             })
+
+    # Filter hallucinations
+    text = resp_data.get("text", "")
+    if _is_hallucination(text):
+        logger.warning(f"[openrouter-stt] Detected hallucination: '{text}' — filtering out")
+        words = []
+
+    # Filter zero-duration artifacts
+    words = _filter_words(words)
 
     logger.info(f"[openrouter-stt] model={model}, words={len(words)}, duration={resp_data.get('duration', 0):.1f}s, prompt_len={len(prompt)}")
 
@@ -82,9 +132,8 @@ async def transcribe_via_openrouter(
 
 async def isolate_vocals_ffmpeg(audio_path: str, output_path: str) -> bool:
     """
-    Attempt vocal isolation using ffmpeg's center channel extraction filter.
-    Returns True if successful, False otherwise.
-    Uses afftdn + stereo mixing to isolate center channel (vocals).
+    Attempt vocal isolation using ffmpeg filters.
+    Uses highpass + lowpass + afftdn to reduce music and isolate vocals.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
