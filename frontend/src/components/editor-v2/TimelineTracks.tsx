@@ -85,8 +85,10 @@ export default function TimelineTracks({ state, actions, videoRef }: Props) {
           {/* Track 1: Words */}
           <div className="absolute top-0 left-0 right-0 h-[40px] border-b border-neutral-800">
             {state.words.map((w, i) => {
-              const left = timeToX(w.start, 100);
-              const width = Math.max(30, ((w.end - w.start) / dur) * 100 * zoom);
+              const relStart = w.start - state.trimStart;
+              const relEnd = w.end - state.trimStart;
+              const left = timeToX(relStart, 100);
+              const width = Math.max(30, ((relEnd - relStart) / dur) * 100 * zoom);
               const isActive = state.currentTime >= w.start && state.currentTime < w.end;
               return (
                 <div
@@ -138,10 +140,7 @@ export default function TimelineTracks({ state, actions, videoRef }: Props) {
                     e.preventDefault();
                     const clipId = e.dataTransfer.getData('clipId');
                     if (clipId) {
-                      const slots = [...state.timelineSlots];
-                      slots[i] = { ...slots[i], clipId };
-                      // Direct state update through actions
-                      // We use fillSlots as a proxy - TODO: add assignClip action
+                      actions.assignClip(slot.id, clipId);
                     }
                   }}
                   className={`absolute top-1 h-[68px] rounded border overflow-hidden cursor-pointer ${

@@ -132,6 +132,14 @@ export function useEditorState() {
 
   const selectSlot = useCallback((id: string | null) => update('selectedSlotId', id), [update]);
   const selectWord = useCallback((idx: number | null) => update('selectedWordIndex', idx), [update]);
+  const assignClip = useCallback((slotId: string, clipId: string) => {
+    setState(prev => ({
+      ...prev,
+      timelineSlots: prev.timelineSlots.map(s =>
+        s.id === slotId ? { ...s, clipId } : s
+      ),
+    }));
+  }, []);
   const setStyle = useCallback((partial: Partial<EditorStyle>) => setState(prev => ({ ...prev, style: { ...prev.style, ...partial } })), []);
   const setEffects = useCallback((partial: Partial<EditorEffects>) => setState(prev => ({ ...prev, effects: { ...prev.effects, ...partial } })), []);
   const setVisuals = useCallback((partial: Partial<Pick<EditorState, 'framing' | 'background' | 'canvasPosition'>>) => setState(prev => ({ ...prev, ...partial })), []);
@@ -188,7 +196,7 @@ export function useEditorState() {
     audioRef,
     actions: {
       loadAudio, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
-      fillSlots, shuffleSlots, selectSlot, selectWord, setStyle, setEffects, setVisuals,
+      fillSlots, shuffleSlots, selectSlot, selectWord, assignClip, setStyle, setEffects, setVisuals,
       play, pause, seek, setTab, openTrimModal, closeTrimModal, uploadClip, generateSlots,
     },
   };
