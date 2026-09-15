@@ -110,11 +110,30 @@ async def transcribe_via_openrouter(
                 "end": float(w.get("end", 0)),
             })
 
-    # Filter hallucinations
+    # Filter hallucinations — check individual words, not nuke everything
     text = resp_data.get("text", "")
     if _is_hallucination(text):
-        logger.warning(f"[openrouter-stt] Detected hallucination: '{text}' — filtering out")
-        words = []
+        logger.warning(f"[openrouter-stt] Text looks like hallucination: '{text}' — checking individual words")
+        # Don't nuke all words — only remove words that match hallucination patterns
+        words = [w for w in words if not _is_hallucination(w.get("word", ""))]
+        if not words:
+            logger.warning(f"[openrouter-stt] All words were hallucination patterns — keeping raw words as fallback")
+            # Re-parse raw words as fallback (better 0 than nothing? No — return raw)
+            words = []
+            for seg in resp_data.get("segments", []):
+                for w in seg.get("words", []):
+                    words.append({
+                        "word": w.get("word", "").strip(),
+                        "start": float(w.get("start", 0)),
+                        "end": float(w.get("end", 0)),
+                    })
+            if not words and "words" in resp_data:
+                for w in resp_data["words"]:
+                    words.append({
+                        "word": w.get("word", "").strip(),
+                        "start": float(w.get("start", 0)),
+                        "end": float(w.get("end", 0)),
+                    })
 
     # Filter zero-duration artifacts
     words = _filter_words(words)

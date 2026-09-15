@@ -464,6 +464,14 @@ async def api_transcribe_openrouter(
                 w["start"] = round(w.get("start", 0) + segment_offset, 3)
                 w["end"] = round(w.get("end", 0) + segment_offset, 3)
 
+        # If 0 words from trimmed segment (silence/hallucination), try FULL audio
+        if not result.get("words") and segment_offset > 0:
+            logger.warning(f"[openrouter-stt] 0 words from segment {trim_start:.1f}-{trim_end:.1f}s, trying full audio")
+            full_result = await transcribe_via_openrouter(tmp_path, model=model, language=language, prompt=prompt)
+            if full_result.get("words"):
+                logger.info(f"[openrouter-stt] Full audio: {len(full_result['words'])} words")
+                return full_result
+
         return result
     except Exception as e:
         logger.warning(f"[openrouter-stt] Failed: {e}, trying fallback...")
