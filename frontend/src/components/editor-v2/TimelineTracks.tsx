@@ -18,15 +18,15 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
   const innerRef = useRef<HTMLDivElement>(null);
   const dur = state.trimmedDuration || 1;
 
-  // Time → percentage of container width (uses zoom internally)
+  // Time → percentage of inner div width (zoom is already in inner div width)
   const timeToX = useCallback((t: number, width: number) => {
-    return (t / dur) * width * zoom;
-  }, [dur, zoom]);
+    return (t / dur) * width;
+  }, [dur]);
 
   // Pixel → time (relative to trimmed segment)
   const xToTime = useCallback((x: number, width: number) => {
-    return (x / (width * zoom)) * dur;
-  }, [dur, zoom]);
+    return (x / width) * dur;
+  }, [dur]);
 
   // Handle playhead drag — click on timeline to seek
   const handleTimelineClick = (e: React.MouseEvent) => {
@@ -231,7 +231,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
               const relStart = w.start - state.trimStart;
               const relEnd = w.end - state.trimStart;
               const leftPct = timeToX(relStart, 100);
-              const durPct = ((relEnd - relStart) / dur) * 100 * zoom;
+              const durPct = ((relEnd - relStart) / dur) * 100;
               const isActive = state.currentTime >= w.start && state.currentTime < w.end;
               const isEditing = editingWordIdx === i;
               return (
@@ -334,7 +334,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
           <div className="absolute top-[40px] left-0 h-[76px] border-b border-neutral-800" style={{ width: '100%' }}>
             {state.timelineSlots.map((slot, i) => {
               const left = timeToX(slot.start, 100);
-              const width = Math.max(20, ((slot.end - slot.start) / dur) * 100 * zoom);
+              const width = Math.max(20, ((slot.end - slot.start) / dur) * 100);
               const clip = state.clips.find(c => c.id === slot.clipId);
               const isSelected = state.selectedSlotId === slot.id;
               return (
