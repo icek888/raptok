@@ -65,6 +65,18 @@ export default function TrimModal({ state, actions }: PanelProps) {
     ctx.fillRect(phX - 1, 0, 2, H);
   }, [state.audioWaveform, state.trimStart, state.trimEnd, state.audioDuration, playhead, zoom]);
 
+  // Space to play/pause
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && state.audioFile) {
+        e.preventDefault();
+        togglePlay();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [state.audioFile, playing, playhead]);
+
   // Handle file upload
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -86,8 +98,20 @@ export default function TrimModal({ state, actions }: PanelProps) {
     const time = (x / rect.width) * state.audioDuration;
     const distStart = Math.abs(time - state.trimStart);
     const distEnd = Math.abs(time - state.trimEnd);
-    if (distStart < 2) setDragging('start');
-    else if (distEnd < 2) setDragging('end');
+    if (distStart < 2) {
+      setDragging('start');
+    } else if (distEnd < 2) {
+      setDragging('end');
+    } else {
+      // Click on waveform → seek playhead
+      setPlayhead(time);
+      if (audioRef.current) {
+        audioRef.current.currentTime = time;
+        if (playing) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
