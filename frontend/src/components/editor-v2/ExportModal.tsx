@@ -18,69 +18,94 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
     setError('');
 
     try {
-      // Build fragments from timeline slots
+      // Get the video server path (not blob URL — backend needs filesystem path)
+      const clip = state.clips[0];
+      const videoPath = clip?.serverPath || '';
+      if (!videoPath) {
+        throw new Error('No video clip with server path. Upload a clip first.');
+      }
+
+      // Build fragments — backend Fragment needs: id, start, duration
+      // Each slot = one fragment from the clip
       const fragments = state.timelineSlots
-        .filter(slot => slot.clipId)
-        .map(slot => {
-          const clip = state.clips.find(c => c.id === slot.clipId);
+        .filter(s => s.clipId)
+        .map((slot, i) => {
+          const fragStart = slot.fragmentStart || 0;
+          const fragDur = slot.fragmentDuration || (slot.end - slot.start);
           return {
-            source: clip?.serverPath || clip?.videoUrl || '',
-            start: slot.fragmentStart || 0,
-            end: (slot.fragmentStart || 0) + (slot.fragmentDuration || (slot.end - slot.start)),
-            slot_start: slot.start,
-            slot_end: slot.end,
+            id: i,
+            start: fragStart,
+            duration: fragDur,
           };
         });
 
-      // Build subtitles from words
-      const subtitles = state.words.map(w => ({
-        start: w.start - state.trimStart,
-        end: w.end - state.trimStart,
-        text: w.word,
-        words: [w.word],
+      if (fragments.length === 0) {
+        throw new Error('No slots with clips assigned. Use Gen Slots + FILL first.');
+      }
+
+      // Build word_timings — relative to audio_start (trimStart)
+      const wordTimings = state.words.map(w => ({
+        word: w.word,
+        start: Math.max(0, w.start - state.trimStart),
+        end: Math.max(0, w.end - state.trimStart),
       }));
 
-      // Style from editor state
+      // Build subtitles from word_timings (group words into lines)
+      const subtitles = state.words.map((w, i) => ({
+        id: i,
+        start: Math.max(0, w.start - state.trimStart),
+        end: Math.max(0, w.end - state.trimStart),
+        text: w.word,
+        words: [{ word: w.word, start: Math.max(0, w.start - state.trimStart), end: Math.max(0, w.end - state.trimStart) }],
+      }));
+
+      // Build style — backend SubtitleStyle format
       const style = {
-        font: state.style.fontFamily,
-        size: state.style.fontSize,
-        color: state.style.color,
-        highlight: state.style.highlightColor,
-        weight: state.style.fontWeight,
+        font: state.style.fontFamily || 'Arial',
+        size: state.style.fontSize || 96,
+        primary_color: '&H00FFFFFF',
+        active_color: '&H00D7FF',
+        outline_color: '&H00000000',
+        outline_width: 4,
+        position: state.style.position === 'top' ? 'top' : state.style.position === 'center' ? 'center' : 'bottom',
+        margin_v: 80,
+        margin_l: 60,
+        bold: state.style.fontWeight >= 700,
       };
 
+      const audioPath = state.audioUrl || '';
+      // If audioUrl is a blob URL, we need the server path
+      // For now, send empty — backend will use video audio if no audio_path
       const resp = await fetch('/api/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          video_path: state.clips[0]?.serverPath || state.clips[0]?.videoUrl || '',
+          video_path: videoPath,
           fragments,
-          audio_path: state.audioUrl || '',
+          audio_path: audioPath.startsWith('blob:') ? '' : audioPath,
           audio_start: state.trimStart,
           subtitles,
           style,
           karaoke: false,
           display_mode: 'word_highlight',
           template_id: '',
-          word_timings: state.words.map(w => ({
-            word: w.word,
-            start: w.start - state.trimStart,
-            end: w.end - state.trimStart,
-          })),
+          word_timings: wordTimings,
           beat_effects_enabled: false,
         }),
       });
 
       if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
+        const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
         throw new Error(err.detail || `HTTP ${resp.status}`);
       }
 
       const data = await resp.json();
-      setResultUrl(data.download_url || `/api/download/${data.filename}`);
+      const filename = data.filename || data.output_path?.split('/').pop();
+      setResultUrl(`/api/download/${filename}`);
       setStatus('done');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Export failed');
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
       setStatus('error');
     }
   };
@@ -150,7 +175,7 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
         {status === 'error' && (
           <div className="text-center py-8">
             <p className="text-red-400 text-sm mb-2">❌ Export failed</p>
-            <p className="text-neutral-500 text-xs">{error}</p>
+            <p className="text-neutral-500 text-xs break-words max-w-full">{error}</p>
           </div>
         )}
 

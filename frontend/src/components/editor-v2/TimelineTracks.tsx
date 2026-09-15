@@ -62,11 +62,23 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                 if (!video || cancelled) return resolve();
                 try {
                   const c = document.createElement('canvas');
-                  c.width = 54; c.height = 96; // small 9:16 thumb
+                  c.width = 108; c.height = 192; // 9:16 proper aspect ratio
                   const ctx = c.getContext('2d');
                   if (ctx) {
-                    ctx.drawImage(video, 0, 0, 54, 96);
-                    newThumbs[`${slot.id}_${ti}`] = c.toDataURL('image/jpeg', 0.6);
+                    // Use object-fit cover: draw video centered, crop to fill 9:16
+                    const vw = video.videoWidth;
+                    const vh = video.videoHeight;
+                    if (vw && vh) {
+                      const scale = Math.max(c.width / vw, c.height / vh);
+                      const dw = vw * scale;
+                      const dh = vh * scale;
+                      const dx = (c.width - dw) / 2;
+                      const dy = (c.height - dh) / 2;
+                      ctx.drawImage(video, dx, dy, dw, dh);
+                    } else {
+                      ctx.drawImage(video, 0, 0, c.width, c.height);
+                    }
+                    newThumbs[`${slot.id}_${ti}`] = c.toDataURL('image/jpeg', 0.8);
                   }
                 } catch { /* CORS */ }
                 resolve();
