@@ -434,6 +434,8 @@ export const api = {
     audioFile: File,
     language: string = 'ru',
     model: string = 'qwen/qwen3-asr-0.6b',
+    trimStart: number = 0,
+    trimEnd: number = 0,
   ): Promise<{
     words: { word: string; start: number; end: number }[];
     text: string;
@@ -446,6 +448,10 @@ export const api = {
     form.append('file', audioFile);
     form.append('language', language);
     form.append('model', model);
+    if (trimEnd > trimStart) {
+      form.append('trim_start', String(trimStart));
+      form.append('trim_end', String(trimEnd));
+    }
     return postForm(`${API_BASE}/transcribe/openrouter`, form);
   },
 };

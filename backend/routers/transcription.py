@@ -416,16 +416,43 @@ async def api_transcribe_openrouter(
     file: UploadFile = File(...),
     language: str = Form("ru"),
     model: str = Form("qwen/qwen3-asr-0.6b"),
+    trim_start: float = Form(0.0),
+    trim_end: float = Form(0.0),
 ):
-    """Transcribe audio via OpenRouter STT with CrisperWhisper fallback."""
+    """Transcribe audio via OpenRouter STT with CrisperWhisper fallback.
+    If trim_start/trim_end provided, only transcribes that segment."""
     # Save uploaded file temporarily
     suffix = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
-    tmp_path = os.path.join(tempfile.mkdtemp(), f"stt_input{suffix}")
+    tmp_dir = tempfile.mkdtemp()
+    tmp_path = os.path.join(tmp_dir, f"stt_input{suffix}")
     with open(tmp_path, "wb") as f:
         f.write(await file.read())
 
     try:
-        result = await transcribe_via_openrouter(tmp_path, model=model, language=language)
+        # Cut segment if trim range provided
+        stt_path = tmp_path
+        segment_offset = 0.0
+        if trim_end > trim_start > 0:
+            seg_path = os.path.join(tmp_dir, f"segment{suffix}")
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-ss", str(trim_start), "-t", str(trim_end - trim_start),
+                "-i", tmp_path, "-ar", "16000", "-ac", "1", seg_path,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
+                stt_path = seg_path
+                segment_offset = trim_start
+                logger.info(f"[openrouter-stt] Using trimmed segment: {trim_start:.1f}s → {trim_end:.1f}s")
+
+        result = await transcribe_via_openrouter(stt_path, model=model, language=language)
+
+        # Shift word timestamps back to absolute (relative to full track)
+        if segment_offset > 0:
+            for w in result.get("words", []):
+                w["start"] = round(w.get("start", 0) + segment_offset, 3)
+                w["end"] = round(w.get("end", 0) + segment_offset, 3)
+
         return result
     except Exception as e:
         logger.warning(f"[openrouter-stt] Failed: {e}, trying fallback...")

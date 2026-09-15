@@ -76,7 +76,13 @@ export function useEditorState() {
     if (!state.audioFile) return;
     update('isTranscribing', true);
     try {
-      const result = await api.transcribeOpenRouter(state.audioFile, state.language, state.transcriptModel);
+      const result = await api.transcribeOpenRouter(
+        state.audioFile,
+        state.language,
+        state.transcriptModel,
+        state.trimStart,
+        state.trimEnd,
+      );
       update('words', result.words);
     } catch (e) {
       console.warn('OpenRouter STT failed, falling back to CrisperWhisper:', e);
@@ -84,7 +90,7 @@ export function useEditorState() {
     } finally {
       update('isTranscribing', false);
     }
-  }, [state.audioFile, state.language, state.transcriptModel, update]);
+  }, [state.audioFile, state.language, state.transcriptModel, state.trimStart, state.trimEnd, update]);
 
   const setWords = useCallback((words: WordTiming[]) => update('words', words), [update]);
   const addClip = useCallback((clip: Clip) => setState(prev => ({ ...prev, clips: [...prev.clips, clip] })), []);
