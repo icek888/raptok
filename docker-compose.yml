@@ -35,6 +35,7 @@ services:
       - RAPTOK_TEMP_DIR=/tmp/raptok
       - RAPTOK_OUTPUT_DIR=/output
       - RAPTOK_SECRET=${RAPTOK_SECRET:?RAPTOK_SECRET must be set in .env}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:?OPENROUTER_API_KEY must be set in .env}
     networks:
       - traefik
     labels:
