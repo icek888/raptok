@@ -16,7 +16,75 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const [slotThumbs, setSlotThumbs] = useState<Record<string, string>>({});
+  const thumbVideoRef = useRef<HTMLVideoElement | null>(null);
   const dur = state.trimmedDuration || 1;
+
+  // Generate thumbnails for each slot — 2-3 frames per slot synced to slot's time range
+  useEffect(() => {
+    const slots = state.timelineSlots.filter(s => s.clipId);
+    if (slots.length === 0) { setSlotThumbs({}); return; }
+
+    let video = thumbVideoRef.current;
+    if (!video) {
+      video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.muted = true;
+      video.playsInline = true;
+      thumbVideoRef.current = video;
+    }
+
+    const clips = state.clips;
+    const newThumbs: Record<string, string> = {};
+    let cancelled = false;
+
+    const gen = async () => {
+      for (const slot of slots) {
+        if (cancelled) return;
+        const clip = clips.find(c => c.id === slot.clipId);
+        if (!clip?.videoUrl) continue;
+
+        // Generate 2-3 thumbnails per slot, synced to slot's time range within clip
+        const fragStart = slot.fragmentStart || 0;
+        const fragDur = slot.fragmentDuration || (slot.end - slot.start);
+        const clipDur = clip.duration || fragDur;
+        // 3 timestamps within the fragment: 15%, 50%, 85%
+        const timestamps = [0.15, 0.5, 0.85].map(p => Math.min(fragStart + p * fragDur, clipDur - 0.1));
+
+        for (let ti = 0; ti < timestamps.length; ti++) {
+          if (cancelled) return;
+          try {
+            await new Promise<void>((resolve) => {
+              if (!video) return resolve();
+              video.src = clip.videoUrl!;
+              video.currentTime = timestamps[ti];
+              const onSeeked = () => {
+                if (!video || cancelled) return resolve();
+                try {
+                  const c = document.createElement('canvas');
+                  c.width = 54; c.height = 96; // small 9:16 thumb
+                  const ctx = c.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(video, 0, 0, 54, 96);
+                    newThumbs[`${slot.id}_${ti}`] = c.toDataURL('image/jpeg', 0.6);
+                  }
+                } catch { /* CORS */ }
+                resolve();
+              };
+              const onError = () => resolve();
+              video.addEventListener('seeked', onSeeked, { once: true });
+              video.addEventListener('error', onError, { once: true });
+              setTimeout(resolve, 2000);
+            });
+          } catch { /* skip */ }
+        }
+      }
+      if (!cancelled) setSlotThumbs(newThumbs);
+    };
+
+    gen();
+    return () => { cancelled = true; };
+  }, [state.timelineSlots, state.clips]);
 
   // Time → percentage of inner div width (zoom is already in inner div width)
   const timeToX = useCallback((t: number, width: number) => {
@@ -355,12 +423,17 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                   style={{ left: `${left}%`, width: `${width}%` }}
                 >
                   {clip ? (
-                    <div className="w-full h-full bg-neutral-700 flex items-center justify-center">
-                      {clip.thumbnail ? (
-                        <img src={clip.thumbnail} className="w-full h-full object-cover" alt="" />
-                      ) : (
-                        <span className="text-[10px] text-neutral-400 truncate px-1">{clip.name.slice(0, 8)}</span>
-                      )}
+                    <div className="w-full h-full flex gap-px bg-neutral-900">
+                      {[0, 1, 2].map(ti => {
+                        const thumb = slotThumbs[`${slot.id}_${ti}`];
+                        return thumb ? (
+                          <img key={ti} src={thumb} className="flex-1 h-full object-cover" alt="" />
+                        ) : (
+                          <div key={ti} className="flex-1 h-full bg-neutral-800 flex items-center justify-center">
+                            <span className="text-[8px] text-neutral-600">⋯</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="w-full h-full bg-neutral-900 flex items-center justify-center">
