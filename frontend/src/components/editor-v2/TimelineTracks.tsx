@@ -15,6 +15,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
   const [slotCountInput, setSlotCountInput] = useState(0); // 0 = use BPM
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const dur = state.trimmedDuration || 1;
 
   // Time → percentage of container width (uses zoom internally)
@@ -119,16 +120,15 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
     };
   }, [dragState, state.words, state.trimStart, dur, xToTime, actions]);
 
-  // --- Issue 3: Redraw waveform canvas to match the zoomed container width ---
+  // --- Redraw waveform canvas to match the zoomed inner div width ---
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
+    const inner = innerRef.current;
+    if (!canvas || !inner) return;
     const draw = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      const inner = container.querySelector('[style*="widthPct"]') || container.firstElementChild || container;
-      const W = (canvas.width = (inner as HTMLElement).offsetWidth);
+      const W = (canvas.width = inner.offsetWidth);
       const H = (canvas.height = canvas.offsetHeight);
       ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, W, H);
@@ -143,9 +143,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
       }
     };
     draw();
-    // Redraw on zoom change and waveform change
     const ro = new ResizeObserver(draw);
-    ro.observe(container);
+    ro.observe(inner);
     return () => ro.disconnect();
   }, [zoom, state.audioWaveform, widthPct]);
 
@@ -200,7 +199,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         className="flex-1 overflow-x-auto overflow-y-hidden relative"
         onClick={handleTimelineClick}
       >
-        <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
+        <div ref={innerRef} style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
           {/* Track 1: Words */}
           <div className="absolute top-0 left-0 h-[36px] border-b border-neutral-800" style={{ width: '100%' }}>
             {state.words.map((w, i) => {

@@ -2,6 +2,7 @@
 import os
 import httpx
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,7 @@ async def transcribe_via_openrouter(
     audio_path: str,
     model: str = "openai/whisper-1",
     language: str = "ru",
+    prompt: str = "",
 ) -> dict:
     """
     Transcribe audio file via OpenRouter STT API using multipart file upload.
@@ -34,6 +36,10 @@ async def transcribe_via_openrouter(
             "response_format": "verbose_json",
             "timestamp_granularities[]": "word",
         }
+        # Whisper-1 supports optional prompt for context
+        if prompt:
+            data["prompt"] = prompt
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 OPENROUTER_STT_URL,
@@ -63,7 +69,7 @@ async def transcribe_via_openrouter(
                 "end": float(w.get("end", 0)),
             })
 
-    logger.info(f"[openrouter-stt] model={model}, words={len(words)}, duration={resp_data.get('duration', 0):.1f}s")
+    logger.info(f"[openrouter-stt] model={model}, words={len(words)}, duration={resp_data.get('duration', 0):.1f}s, prompt_len={len(prompt)}")
 
     return {
         "words": words,
@@ -72,3 +78,28 @@ async def transcribe_via_openrouter(
         "duration": float(resp_data.get("duration", 0)),
         "model": model,
     }
+
+
+async def isolate_vocals_ffmpeg(audio_path: str, output_path: str) -> bool:
+    """
+    Attempt vocal isolation using ffmpeg's center channel extraction filter.
+    Returns True if successful, False otherwise.
+    Uses afftdn + stereo mixing to isolate center channel (vocals).
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", audio_path,
+            "-af", "pan=mono|c0=c0+c1,highpass=f=200,lowpass=f=8000,afftdn=nr=20",
+            "-ar", "16000", "-ac", "1", output_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            logger.info(f"[vocal-isolation] Success: {output_path}")
+            return True
+        logger.warning(f"[vocal-isolation] ffmpeg failed: {stderr.decode()[:200]}")
+        return False
+    except Exception as e:
+        logger.warning(f"[vocal-isolation] Error: {e}")
+        return False

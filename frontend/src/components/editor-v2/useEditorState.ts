@@ -13,6 +13,8 @@ const initialState: EditorState = {
   words: [],
   language: 'ru',
   transcriptModel: 'openai/whisper-1',
+  transcriptPrompt: '',        // optional context prompt for Whisper
+  isolateVocals: false,          // isolate vocals before transcription
   isTranscribing: false,
   clips: [],
   timelineSlots: [],
@@ -85,6 +87,8 @@ export function useEditorState() {
         state.transcriptModel,
         state.trimStart,
         state.trimEnd,
+        state.transcriptPrompt,
+        state.isolateVocals,
       );
       update('words', result.words);
     } catch (e) {
@@ -220,6 +224,9 @@ export function useEditorState() {
     });
   }, []);
 
+  const setTranscriptPrompt = useCallback((prompt: string) => setState(prev => ({ ...prev, transcriptPrompt: prompt })), []);
+  const setIsolateVocals = useCallback((v: boolean) => setState(prev => ({ ...prev, isolateVocals: v })), []);
+
   return {
     state,
     videoRef,
@@ -229,6 +236,7 @@ export function useEditorState() {
       fillSlots, shuffleSlots, splitClipToSlots, selectSlot, selectWord, selectClip,
       setSplitFragments, assignClip, setStyle, setEffects, setVisuals,
       play, pause, seek, setTab, openTrimModal, closeTrimModal, uploadClip, generateSlots,
+      setTranscriptPrompt, setIsolateVocals,
     },
   };
 }

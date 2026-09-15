@@ -6,6 +6,7 @@ export default function LyricsTab({ state, actions }: TabProps) {
   const words = state.words;
   const [manualLyrics, setManualLyrics] = useState('');
   const [manualMode, setManualMode] = useState(false);
+  const [showSTTOptions, setShowSTTOptions] = useState(false);
 
   // Apply manual lyrics: split into words and distribute evenly across trimmed duration
   const applyManualLyrics = () => {
@@ -66,7 +67,38 @@ export default function LyricsTab({ state, actions }: TabProps) {
           >
             ✏ Manual
           </button>
+          <button
+            onClick={() => setShowSTTOptions(!showSTTOptions)}
+            className={`px-2 py-1 text-xs rounded ${showSTTOptions ? 'bg-cyan-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+            title="STT options: prompt + vocal isolation"
+          >
+            ⚙
+          </button>
         </div>
+
+        {/* STT Options: prompt + vocal isolation */}
+        {showSTTOptions && (
+          <div className="space-y-2 p-2 bg-neutral-900 rounded border border-neutral-800">
+            <div>
+              <label className="text-[10px] text-neutral-500 block mb-1">Prompt for Whisper (context helps accuracy)</label>
+              <textarea
+                value={state.transcriptPrompt}
+                onChange={(e) => actions.setTranscriptPrompt(e.target.value)}
+                placeholder="рэп улицы цензура брат бомби..."
+                className="w-full text-xs bg-neutral-800 text-neutral-300 rounded px-2 py-1 border border-neutral-700 h-16 resize-none"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-neutral-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={state.isolateVocals}
+                onChange={(e) => actions.setIsolateVocals(e.target.checked)}
+                className="accent-cyan-500"
+              />
+              🎤 Isolate vocals (remove music before transcription)
+            </label>
+          </div>
+        )}
         <p className="text-[10px] text-neutral-600">Model: {state.transcriptModel}</p>
       </div>
 

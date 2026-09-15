@@ -418,8 +418,10 @@ async def api_transcribe_openrouter(
     model: str = Form("openai/whisper-1"),
     trim_start: float = Form(0.0),
     trim_end: float = Form(0.0),
+    prompt: str = Form(""),
+    isolate_vocals: bool = Form(False),
 ):
-    """Transcribe audio via OpenRouter STT with CrisperWhisper fallback.
+    """Transcribe audio via OpenRouter STT with optional vocal isolation and prompt.
     If trim_start/trim_end provided, only transcribes that segment."""
     # Save uploaded file temporarily
     suffix = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
@@ -445,7 +447,16 @@ async def api_transcribe_openrouter(
                 segment_offset = trim_start
                 logger.info(f"[openrouter-stt] Using trimmed segment: {trim_start:.1f}s → {trim_end:.1f}s")
 
-        result = await transcribe_via_openrouter(stt_path, model=model, language=language)
+        # Optional vocal isolation
+        if isolate_vocals:
+            vocal_path = os.path.join(tmp_dir, "vocals.wav")
+            from services.openrouter_stt import isolate_vocals_ffmpeg
+            success = await isolate_vocals_ffmpeg(stt_path, vocal_path)
+            if success:
+                stt_path = vocal_path
+                logger.info("[openrouter-stt] Using isolated vocals for transcription")
+
+        result = await transcribe_via_openrouter(stt_path, model=model, language=language, prompt=prompt)
 
         # Shift word timestamps back to absolute (relative to full track)
         if segment_offset > 0:

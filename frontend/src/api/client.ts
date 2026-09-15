@@ -440,9 +440,11 @@ export const api = {
   transcribeOpenRouter: (
     audioFile: File,
     language: string = 'ru',
-    model: string = 'qwen/qwen3-asr-0.6b',
+    model: string = 'openai/whisper-1',
     trimStart: number = 0,
     trimEnd: number = 0,
+    prompt: string = '',
+    isolateVocals: boolean = false,
   ): Promise<{
     words: { word: string; start: number; end: number }[];
     text: string;
@@ -459,6 +461,8 @@ export const api = {
       form.append('trim_start', String(trimStart));
       form.append('trim_end', String(trimEnd));
     }
+    if (prompt) form.append('prompt', prompt);
+    if (isolateVocals) form.append('isolate_vocals', 'true');
     return postForm(`${API_BASE}/transcribe/openrouter`, form);
   },
 };

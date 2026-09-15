@@ -61,6 +61,8 @@ export interface EditorState {
   words: WordTiming[];
   language: 'ru' | 'en' | 'auto';
   transcriptModel: string;
+  transcriptPrompt: string;
+  isolateVocals: boolean;
   isTranscribing: boolean;
 
   // Clips
