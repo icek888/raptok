@@ -9,6 +9,7 @@ interface Props extends PanelProps {
 
 export default function TimelineTracks({ state, actions, videoRef, audioRef }: Props) {
   const [zoom, setZoom] = useState(1);
+  const [editingWordIdx, setEditingWordIdx] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const dur = state.trimmedDuration || 1;
 
@@ -87,7 +88,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         onClick={handleTimelineClick}
       >
         <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words — compact cards, draggable on timeline */}
+          {/* Track 1: Words — compact cards, draggable + double-click to edit */}
           <div className="absolute top-0 left-0 right-0 h-[40px] border-b border-neutral-800">
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
@@ -95,10 +96,11 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
               const left = timeToX(relStart, 100);
               const width = Math.max(30, ((relEnd - relStart) / dur) * 100 * zoom);
               const isActive = state.currentTime >= w.start && state.currentTime < w.end;
+              const isEditing = editingWordIdx === i;
               return (
                 <div
                   key={i}
-                  draggable
+                  draggable={!isEditing}
                   onDragStart={e => {
                     e.dataTransfer.setData('wordIdx', String(i));
                     e.dataTransfer.effectAllowed = 'move';
@@ -108,7 +110,6 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     e.preventDefault();
                     const fromIdx = parseInt(e.dataTransfer.getData('wordIdx'));
                     if (isNaN(fromIdx) || fromIdx === i) return;
-                    // Swap word positions
                     const words = [...state.words];
                     const tmpStart = words[i].start, tmpEnd = words[i].end;
                     words[i] = { ...words[i], start: words[fromIdx].start, end: words[fromIdx].end };
@@ -116,7 +117,10 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     actions.setWords(words);
                   }}
                   onClick={e => { e.stopPropagation(); actions.selectWord(i); }}
-                  className={`absolute top-1 h-[28px] flex items-center justify-center px-1.5 text-[10px] rounded cursor-grab active:cursor-grabbing whitespace-nowrap overflow-hidden select-none ${
+                  onDoubleClick={e => { e.stopPropagation(); setEditingWordIdx(i); }}
+                  className={`absolute top-1 h-[28px] flex items-center justify-center px-1.5 text-[10px] rounded whitespace-nowrap overflow-hidden select-none ${
+                    isEditing ? 'cursor-text' : 'cursor-grab active:cursor-grabbing'
+                  } ${
                     isActive
                       ? 'bg-cyan-500 text-black font-semibold'
                       : state.selectedWordIndex === i
@@ -124,9 +128,32 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                   }`}
                   style={{ left: `${left}%`, width: `${width}%`, minWidth: '24px' }}
-                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s`}
+                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit)`}
                 >
-                  {w.word}
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={w.word}
+                      onChange={e => {
+                        const words = [...state.words];
+                        words[i] = { ...words[i], word: e.target.value };
+                        actions.setWords(words);
+                      }}
+                      onBlur={() => setEditingWordIdx(null)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === 'Escape') {
+                          setEditingWordIdx(null);
+                        }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      onDoubleClick={e => e.stopPropagation()}
+                      className="w-full bg-transparent text-center text-inherit focus:outline-none"
+                      style={{ fontSize: '10px', color: 'inherit' }}
+                    />
+                  ) : (
+                    w.word
+                  )}
                 </div>
               );
             })}
