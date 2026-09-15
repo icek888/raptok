@@ -6,13 +6,15 @@ import logging
 import os
 import hashlib
 import subprocess
-from fastapi import APIRouter, Form, HTTPException
+import tempfile
+from fastapi import APIRouter, Form, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from models.schemas import TranscribeRequest, TranscribeResult
 from services.speech_recognizer import transcribe_to_lyrics, transcribe_audio
 from services.forced_alignment import align_lyrics_to_timings
 from services.bpm_detector import detect_bpm
 from services.stem_separator import separate_vocals, separate_vocals_with_stems
+from services.openrouter_stt import transcribe_via_openrouter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -405,3 +407,50 @@ async def _run_pretranscribe(audio_path: str, language: str, model_size: str):
             "error": str(e),
             "started_at": time.time(),
         }
+
+
+# ─── Editor v2: OpenRouter STT ───
+
+@router.post("/api/transcribe/openrouter")
+async def api_transcribe_openrouter(
+    file: UploadFile = File(...),
+    language: str = Form("ru"),
+    model: str = Form("qwen/qwen3-asr-0.6b"),
+):
+    """Transcribe audio via OpenRouter STT with CrisperWhisper fallback."""
+    # Save uploaded file temporarily
+    suffix = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
+    tmp_path = os.path.join(tempfile.mkdtemp(), f"stt_input{suffix}")
+    with open(tmp_path, "wb") as f:
+        f.write(await file.read())
+
+    try:
+        result = await transcribe_via_openrouter(tmp_path, model=model, language=language)
+        return result
+    except Exception as e:
+        logger.warning(f"[openrouter-stt] Failed: {e}, trying fallback...")
+        # Fallback to local CrisperWhisper
+        try:
+            from services.crisper_transcriber import transcribe_audio_crisper
+            fallback_result = transcribe_audio_crisper(tmp_path, language=language)
+            if isinstance(fallback_result, dict):
+                return {**fallback_result, "fallback": True, "error": str(e)}
+            # If it returns a different format, normalize
+            return {
+                "words": fallback_result.get("words", []) if isinstance(fallback_result, dict) else [],
+                "text": fallback_result.get("text", "") if isinstance(fallback_result, dict) else str(fallback_result),
+                "language": language,
+                "duration": 0,
+                "model": "crisper-whisper-fallback",
+                "fallback": True,
+                "error": str(e),
+            }
+        except Exception as fallback_err:
+            logger.error(f"[openrouter-stt] Fallback also failed: {fallback_err}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"OpenRouter failed: {e}. Fallback also failed: {fallback_err}"
+            )
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
