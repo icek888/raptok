@@ -368,6 +368,13 @@ export const api = {
     return postForm('/api/audio-from-youtube', form);
   },
 
+  // ── Video from YouTube ──
+  videoFromYouTube: (url: string): Promise<VideoInfo> => {
+    const form = new FormData();
+    form.append('url', url);
+    return postForm('/api/video-from-youtube', form);
+  },
+
   // ── Auto Cut by Audio ──
   autoCutByAudio: (audioPath: string, videoDuration: number, minFrag = 3, maxFrag = 6, clipStart = 0, clipLength = 0) => {
     const form = new FormData();

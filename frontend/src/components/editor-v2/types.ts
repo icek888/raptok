@@ -14,6 +14,8 @@ export interface Clip {
   thumbnail: string;
   duration: number;
   locked: boolean;
+  videoUrl?: string;       // object URL for preview playback
+  serverPath?: string;     // backend path for rendering
 }
 
 export interface TimelineSlot {

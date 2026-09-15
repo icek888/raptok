@@ -1,9 +1,12 @@
 import { useState, useRef, useCallback } from 'react';
+import { api } from '../../api/client';
 import type { PanelProps } from './EditorView';
 import type { Clip } from './types';
 
 export default function ClipsPanel({ state, actions }: PanelProps) {
   const [activeTab, setActiveTab] = useState<'stock' | 'user'>('user');
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytLoading, setYtLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const userClips = state.clips.filter(c => c.source === 'user');
@@ -15,6 +18,34 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
     Array.from(files).forEach(f => actions.uploadClip(f));
     e.target.value = '';
   }, [actions]);
+
+  const handleYouTubeDownload = useCallback(async () => {
+    if (!ytUrl.trim() || ytLoading) return;
+    setYtLoading(true);
+    try {
+      const result = await api.videoFromYouTube(ytUrl.trim());
+      // Build a download URL for the server file (for preview playback)
+      const previewUrl = `/api/video/${encodeURIComponent(result.local_path.split('/').pop() || '')}`;
+      const newClip: Clip = {
+        id: crypto.randomUUID(),
+        name: result.title || 'YouTube clip',
+        source: 'user',
+        thumbnail: '',
+        duration: result.duration || 0,
+        locked: false,
+        videoUrl: previewUrl,
+        serverPath: result.local_path,
+      };
+      // Use addClip from actions
+      actions.addClip(newClip);
+      setYtUrl('');
+    } catch (e) {
+      console.error('YouTube download error:', e);
+      alert('YouTube download failed: ' + (e as Error).message);
+    } finally {
+      setYtLoading(false);
+    }
+  }, [ytUrl, ytLoading, actions]);
 
   const handleDragStart = (e: React.DragEvent, clipId: string) => {
     e.dataTransfer.setData('clipId', clipId);
@@ -55,6 +86,31 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
           onChange={handleUpload}
           className="hidden"
         />
+      </div>
+
+      {/* YouTube download */}
+      <div className="px-3 py-2 border-b border-neutral-800 space-y-2">
+        <div className="flex gap-1">
+          <input
+            type="text"
+            value={ytUrl}
+            onChange={e => setYtUrl(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleYouTubeDownload()}
+            placeholder="YouTube URL..."
+            disabled={ytLoading}
+            className="flex-1 px-2 py-1 text-xs bg-neutral-900 border border-neutral-700 rounded text-neutral-200 placeholder-neutral-600 focus:border-cyan-500 focus:outline-none"
+          />
+          <button
+            onClick={handleYouTubeDownload}
+            disabled={ytLoading || !ytUrl.trim()}
+            className="px-2 py-1 text-xs bg-red-600 hover:bg-red-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-medium rounded"
+          >
+            {ytLoading ? '⏳' : '▶'}
+          </button>
+        </div>
+        {ytLoading && (
+          <p className="text-[10px] text-amber-400 animate-pulse">Downloading from YouTube...</p>
+        )}
       </div>
 
       {/* Clip grid */}

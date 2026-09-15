@@ -14,7 +14,7 @@ export interface PanelProps {
 
 export default function EditorView() {
   const editor = useEditorState();
-  const { state, actions, videoRef } = editor;
+  const { state, actions, videoRef, audioRef } = editor;
   const props: PanelProps = { state, actions };
 
   return (
@@ -54,14 +54,21 @@ export default function EditorView() {
         {/* Center: Preview */}
         <div className="flex-1 min-w-0 flex items-center justify-center bg-neutral-900">
           {state.audioUrl ? (
-            <PreviewCanvas {...props} videoRef={videoRef} />
+            <PreviewCanvas {...props} videoRef={videoRef} audioRef={audioRef} />
           ) : (
-            <button
-              onClick={() => actions.openTrimModal()}
-              className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded-lg transition-colors"
-            >
-              + New Project
-            </button>
+            <div className="text-center space-y-4">
+              <div className="text-6xl">🎬</div>
+              <h2 className="text-xl text-neutral-300 font-medium">RapTok Editor</h2>
+              <p className="text-sm text-neutral-500 max-w-xs">
+                Load audio to start. Trim a 15-30s segment, transcribe lyrics, add video clips.
+              </p>
+              <button
+                onClick={() => actions.openTrimModal()}
+                className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded-lg transition-colors"
+              >
+                📁 Load Audio
+              </button>
+            </div>
           )}
         </div>
 

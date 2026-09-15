@@ -44,6 +44,7 @@ const initialState: EditorState = {
 export function useEditorState() {
   const [state, setState] = useState<EditorState>(initialState);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const update = useCallback(<K extends keyof EditorState>(key: K, value: EditorState[K]) => {
     setState(prev => ({ ...prev, [key]: value }));
@@ -134,7 +135,14 @@ export function useEditorState() {
   const setStyle = useCallback((partial: Partial<EditorStyle>) => setState(prev => ({ ...prev, style: { ...prev.style, ...partial } })), []);
   const setEffects = useCallback((partial: Partial<EditorEffects>) => setState(prev => ({ ...prev, effects: { ...prev.effects, ...partial } })), []);
   const setVisuals = useCallback((partial: Partial<Pick<EditorState, 'framing' | 'background' | 'canvasPosition'>>) => setState(prev => ({ ...prev, ...partial })), []);
-  const play = useCallback(() => update('isPlaying', true), [update]);
+  const play = useCallback(() => {
+    // If at start, seek to trimStart
+    const audio = audioRef.current;
+    if (audio && (state.currentTime < state.trimStart || state.currentTime >= state.trimEnd)) {
+      audio.currentTime = state.trimStart;
+    }
+    update('isPlaying', true);
+  }, [update, state.currentTime, state.trimStart, state.trimEnd]);
   const pause = useCallback(() => update('isPlaying', false), [update]);
   const seek = useCallback((time: number) => update('currentTime', time), [update]);
   const setTab = useCallback((tab: EditorState['activeTab']) => update('activeTab', tab), [update]);
@@ -151,6 +159,8 @@ export function useEditorState() {
         thumbnail: '',
         duration: result.duration,
         locked: false,
+        videoUrl: URL.createObjectURL(file),
+        serverPath: result.local_path,
       };
       addClip(newClip);
     } catch (e) {
@@ -175,6 +185,7 @@ export function useEditorState() {
   return {
     state,
     videoRef,
+    audioRef,
     actions: {
       loadAudio, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
       fillSlots, shuffleSlots, selectSlot, selectWord, setStyle, setEffects, setVisuals,

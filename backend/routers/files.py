@@ -167,3 +167,58 @@ async def upload_video(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to probe video: {e}")
+
+
+@router.post("/api/video-from-youtube")
+async def video_from_youtube(url: str = Form(...)):
+    """Download video (with audio) from YouTube URL. Returns path + duration + title."""
+    import asyncio
+    import subprocess
+    job_id = f"ytvid_{os.urandom(6).hex()}"
+    video_path = TEMP_DIR / f"{job_id}.mp4"
+    try:
+        # Get video title
+        title_result = await asyncio.to_thread(subprocess.run,
+            ["yt-dlp", "--print", "title", "--no-playlist", url],
+            capture_output=True, text=True, timeout=15
+        )
+        title = title_result.stdout.strip() if title_result.returncode == 0 else None
+
+        # Download best quality mp4, max 1080p
+        result = await asyncio.to_thread(subprocess.run, [
+            "yt-dlp", "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
+            "--merge-output-format", "mp4",
+            "--no-playlist", "-o", str(video_path),
+            url
+        ], capture_output=True, text=True, timeout=180)
+        if result.returncode != 0:
+            raise HTTPException(status_code=400, detail=f"yt-dlp failed: {result.stderr[-500:]}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=408, detail="YouTube download timed out (180s)")
+
+    if not video_path.exists():
+        raise HTTPException(status_code=500, detail="Video file not created")
+
+    # Probe duration
+    try:
+        probe = await asyncio.to_thread(subprocess.run, [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_format", str(video_path)
+        ], capture_output=True, text=True, timeout=10)
+        import json
+        meta = json.loads(probe.stdout)
+        duration = float(meta.get("format", {}).get("duration", 0))
+    except Exception:
+        duration = 0
+
+    display_name = title if title else video_path.name
+    return {
+        "job_id": job_id,
+        "title": display_name,
+        "source": "youtube",
+        "duration": round(duration, 2),
+        "local_path": str(video_path),
+        "url": "",
+        "width": 0,
+        "height": 0,
+    }
