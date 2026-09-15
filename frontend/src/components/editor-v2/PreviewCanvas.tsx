@@ -8,13 +8,14 @@ interface Props extends PanelProps {
 }
 
 export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Props) {
-  // Find current word based on currentTime (absolute time from track start)
-  // Words are in absolute time (relative to full track), currentTime starts at trimStart
-  const relTime = state.currentTime - state.trimStart;
+  // Find current word — words are in absolute time, currentTime is absolute too
   const currentWordIdx = state.words.findIndex(
-    w => relTime >= w.start && relTime < w.end
+    w => state.currentTime >= w.start && state.currentTime < w.end
   );
   const currentWord = currentWordIdx >= 0 ? state.words[currentWordIdx] : null;
+
+  // Relative time for timeline slots (slots are 0-based from trimStart)
+  const relTime = state.currentTime - state.trimStart;
 
   // Calculate lyrics position
   const posTop = state.style.position === 'top' ? '10%'
