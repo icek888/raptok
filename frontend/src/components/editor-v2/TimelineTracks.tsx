@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { PanelProps } from './EditorView';
 import type { RefObject } from 'react';
 
@@ -7,13 +7,16 @@ interface Props extends PanelProps {
   audioRef: RefObject<HTMLAudioElement | null>;
 }
 
+type DragMode = 'move' | 'resize-left' | 'resize-right' | null;
+
 export default function TimelineTracks({ state, actions, videoRef, audioRef }: Props) {
   const [zoom, setZoom] = useState(1);
   const [editingWordIdx, setEditingWordIdx] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const dur = state.trimmedDuration || 1;
 
-  // Time → pixel position (relative to trimmed segment, not full track)
+  // Time → percentage of container width (uses zoom internally)
   const timeToX = useCallback((t: number, width: number) => {
     return (t / dur) * width * zoom;
   }, [dur, zoom]);
@@ -45,6 +48,103 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
   const widthPct = `${zoom * 100}%`;
+
+  // --- Issue 2: Word card resize/move drag state ---
+  const [dragState, setDragState] = useState<{
+    wordIdx: number;
+    mode: DragMode;
+    startX: number;
+    origStart: number;
+    origEnd: number;
+    containerWidth: number;
+  } | null>(null);
+
+  // Start a drag (resize handle or middle move)
+  const startWordDrag = (
+    e: React.MouseEvent,
+    wordIdx: number,
+    mode: 'move' | 'resize-left' | 'resize-right',
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const w = state.words[wordIdx];
+    if (!w) return;
+    setDragState({
+      wordIdx,
+      mode,
+      startX: e.clientX,
+      origStart: w.start,
+      origEnd: w.end,
+      containerWidth: container.getBoundingClientRect().width,
+    });
+  };
+
+  // Global mousemove/mouseup while dragging
+  useEffect(() => {
+    if (!dragState) return;
+    const handleMove = (e: MouseEvent) => {
+      const ds = dragState;
+      const deltaX = e.clientX - ds.startX;
+      const deltaTime = xToTime(deltaX, ds.containerWidth);
+      const words = [...state.words];
+      const w = { ...words[ds.wordIdx] };
+      if (ds.mode === 'resize-left') {
+        // Drag left edge → change start (can't exceed end)
+        w.start = Math.min(ds.origStart + deltaTime, ds.origEnd - 0.05);
+        w.start = Math.max(w.start, state.trimStart);
+      } else if (ds.mode === 'resize-right') {
+        // Drag right edge → change end (can't go below start)
+        w.end = Math.max(ds.origEnd + deltaTime, ds.origStart + 0.05);
+        w.end = Math.min(w.end, state.trimStart + dur);
+      } else if (ds.mode === 'move') {
+        // Move both start and end by same delta, clamp within trim range
+        const durW = ds.origEnd - ds.origStart;
+        let newStart = ds.origStart + deltaTime;
+        newStart = Math.max(state.trimStart, Math.min(newStart, state.trimStart + dur - durW));
+        w.start = newStart;
+        w.end = newStart + durW;
+      }
+      words[ds.wordIdx] = w;
+      actions.setWords(words);
+    };
+    const handleUp = () => setDragState(null);
+    document.addEventListener('mousemove', handleMove);
+    document.addEventListener('mouseup', handleUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMove);
+      document.removeEventListener('mouseup', handleUp);
+    };
+  }, [dragState, state.words, state.trimStart, dur, xToTime, actions]);
+
+  // --- Issue 3: Redraw waveform canvas to match the zoomed container width ---
+  // The canvas must use the SAME width as the container (widthPct), not offsetWidth.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+    const draw = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      // Use the container's actual rendered width (which follows widthPct)
+      const W = (canvas.width = container.offsetWidth);
+      const H = (canvas.height = canvas.offsetHeight);
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, W, H);
+      const bars = state.audioWaveform;
+      if (!bars.length) return;
+      const barWidth = W / bars.length;
+      ctx.fillStyle = '#444';
+      for (let i = 0; i < bars.length; i++) {
+        const x = i * barWidth;
+        const h = bars[i] * H * 0.8;
+        ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 0.5), h);
+      }
+    };
+    draw();
+    // Redraw on zoom change (container width changes) and waveform change
+  }, [zoom, state.audioWaveform, widthPct]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-950">
@@ -81,14 +181,14 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         </div>
       </div>
 
-      {/* Tracks */}
+      {/* Tracks — all 3 inside the same widthPct div (Issue 3) */}
       <div
         ref={containerRef}
         className="flex-1 overflow-x-auto overflow-y-hidden relative"
         onClick={handleTimelineClick}
       >
         <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words — auto-sized cards, draggable + editable */}
+          {/* Track 1: Words — auto-sized cards, draggable + editable + resize/move (Issue 2) */}
           <div className="absolute top-0 left-0 right-0 h-[36px] border-b border-neutral-800">
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
@@ -100,7 +200,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
               return (
                 <div
                   key={i}
-                  draggable={!isEditing}
+                  draggable={!isEditing && !dragState}
                   onDragStart={e => {
                     e.dataTransfer.setData('wordIdx', String(i));
                     e.dataTransfer.effectAllowed = 'move';
@@ -115,6 +215,10 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     words[i] = { ...words[i], start: words[fromIdx].start, end: words[fromIdx].end };
                     words[fromIdx] = { ...words[fromIdx], start: tmpStart, end: tmpEnd };
                     actions.setWords(words);
+                  }}
+                  onMouseDown={e => {
+                    // Middle drag (move) — only if not editing and not on a resize handle
+                    if (!isEditing) startWordDrag(e, i, 'move');
                   }}
                   onClick={e => { e.stopPropagation(); actions.selectWord(i); }}
                   onDoubleClick={e => { e.stopPropagation(); setEditingWordIdx(i); }}
@@ -134,8 +238,13 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     fontSize: '10px',
                     minWidth: `${Math.max(durPct, 2)}%`,
                   }}
-                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit, drag to swap)`}
+                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit, drag edges to resize, drag middle to move)`}
                 >
+                  {/* Left resize handle (Issue 2) */}
+                  <div
+                    onMouseDown={e => startWordDrag(e, i, 'resize-left')}
+                    className="absolute left-0 top-0 bottom-0 w-[4px] cursor-ew-resize bg-cyan-400/0 hover:bg-cyan-400/50 rounded-l"
+                  />
                   {isEditing ? (
                     <input
                       autoFocus
@@ -152,12 +261,18 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                       }}
                       onClick={e => e.stopPropagation()}
                       onDoubleClick={e => e.stopPropagation()}
+                      onMouseDown={e => e.stopPropagation()}
                       className="bg-transparent text-center focus:outline-none"
                       style={{ fontSize: '10px', color: 'inherit', width: '60px' }}
                     />
                   ) : (
                     w.word
                   )}
+                  {/* Right resize handle (Issue 2) */}
+                  <div
+                    onMouseDown={e => startWordDrag(e, i, 'resize-right')}
+                    className="absolute right-0 top-0 bottom-0 w-[4px] cursor-ew-resize bg-cyan-400/0 hover:bg-cyan-400/50 rounded-r"
+                  />
                 </div>
               );
             })}
@@ -225,27 +340,10 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform */}
+          {/* Track 3: Audio waveform — canvas uses container width (Issue 3) */}
           <div className="absolute top-[120px] left-0 right-0 h-[60px]">
             <canvas
-              ref={canvas => {
-                if (canvas && state.audioWaveform.length) {
-                  const ctx = canvas.getContext('2d');
-                  if (!ctx) return;
-                  const W = canvas.width = canvas.offsetWidth;
-                  const H = canvas.height = canvas.offsetHeight;
-                  ctx.fillStyle = '#0a0a0a';
-                  ctx.fillRect(0, 0, W, H);
-                  const bars = state.audioWaveform;
-                  const barWidth = W / bars.length;
-                  ctx.fillStyle = '#444';
-                  for (let i = 0; i < bars.length; i++) {
-                    const x = i * barWidth;
-                    const h = bars[i] * H * 0.8;
-                    ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 0.5), h);
-                  }
-                }
-              }}
+              ref={canvasRef}
               className="w-full h-full"
             />
           </div>

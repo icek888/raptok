@@ -130,8 +130,8 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
                 key={clip.id}
                 draggable
                 onDragStart={e => handleDragStart(e, clip.id)}
-                onClick={() => actions.lockClip(clip.id)}
-                className={`relative aspect-video bg-neutral-800 rounded cursor-grab active:cursor-grabbing overflow-hidden group ${clip.locked ? 'ring-2 ring-amber-500' : ''}`}
+                onClick={() => actions.selectClip(clip.id)}
+                className={`relative aspect-video bg-neutral-800 rounded cursor-grab active:cursor-grabbing overflow-hidden group ${clip.locked ? 'ring-2 ring-amber-500' : ''} ${state.selectedClipId === clip.id ? 'ring-2 ring-fuchsia-500' : ''}`}
               >
                 {clip.thumbnail ? (
                   <img src={clip.thumbnail} alt={clip.name} className="w-full h-full object-cover" />
@@ -157,6 +157,38 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
         <p className="text-xs text-neutral-500">
           {state.clips.length} clips · {state.timelineSlots.length} slots · {shufflable} shufflable
         </p>
+        {/* Split controls: fragment count + split-to-slots button */}
+        <div className="flex items-center gap-2">
+          <label className="text-[10px] text-neutral-500">Fragments:</label>
+          <select
+            value={state.splitFragments}
+            onChange={e => actions.setSplitFragments(Number(e.target.value))}
+            className="px-1 py-0.5 text-xs bg-neutral-900 border border-neutral-700 rounded text-neutral-200 focus:border-cyan-500 focus:outline-none"
+          >
+            {Array.from({ length: 9 }, (_, i) => i + 2).map(n => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              if (state.timelineSlots.length === 0) {
+                alert('No slots! Click "Gen Slots" first to generate timeline from BPM.');
+                return;
+              }
+              if (!state.selectedClipId) {
+                alert('Select a clip first (click a clip thumbnail) then click Split to slots.');
+                return;
+              }
+              actions.splitClipToSlots(state.selectedClipId, state.splitFragments);
+              const frags = state.splitFragments;
+              alert(`Split to slots: clip assigned to ALL ${state.timelineSlots.length} slots · ${frags} fragments at render.`);
+            }}
+            disabled={!state.selectedClipId || state.timelineSlots.length === 0}
+            className="flex-1 py-1.5 text-xs bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-neutral-800 disabled:text-neutral-600 text-white font-medium rounded"
+          >
+            SPLIT TO SLOTS
+          </button>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => {

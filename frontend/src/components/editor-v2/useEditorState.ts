@@ -38,6 +38,8 @@ const initialState: EditorState = {
   activeTab: 'lyrics',
   selectedSlotId: null,
   selectedWordIndex: null,
+  selectedClipId: null,
+  splitFragments: 4,
   isTrimModalOpen: false,
 };
 
@@ -130,6 +132,8 @@ export function useEditorState() {
 
   const selectSlot = useCallback((id: string | null) => update('selectedSlotId', id), [update]);
   const selectWord = useCallback((idx: number | null) => update('selectedWordIndex', idx), [update]);
+  const selectClip = useCallback((id: string | null) => update('selectedClipId', id), [update]);
+  const setSplitFragments = useCallback((n: number) => update('splitFragments', n), [update]);
   const assignClip = useCallback((slotId: string, clipId: string) => {
     setState(prev => ({
       ...prev,
@@ -190,13 +194,25 @@ export function useEditorState() {
     update('timelineSlots', slots);
   }, [state.bpm, state.trimmedDuration, update]);
 
+  // Split a single clip to ALL slots (same clip fills every slot).
+  // splitFragments controls how many pieces the clip will be cut into at render time.
+  const splitClipToSlots = useCallback((clipId: string, fragments: number) => {
+    setState(prev => {
+      if (prev.timelineSlots.length === 0) return prev;
+      const f = Math.max(2, Math.min(10, Math.floor(fragments)));
+      const slots = prev.timelineSlots.map(slot => ({ ...slot, clipId }));
+      return { ...prev, timelineSlots: slots, selectedClipId: clipId, splitFragments: f };
+    });
+  }, []);
+
   return {
     state,
     videoRef,
     audioRef,
     actions: {
       loadAudio, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
-      fillSlots, shuffleSlots, selectSlot, selectWord, assignClip, setStyle, setEffects, setVisuals,
+      fillSlots, shuffleSlots, splitClipToSlots, selectSlot, selectWord, selectClip,
+      setSplitFragments, assignClip, setStyle, setEffects, setVisuals,
       play, pause, seek, setTab, openTrimModal, closeTrimModal, uploadClip, generateSlots,
     },
   };

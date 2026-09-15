@@ -87,5 +87,7 @@ export interface EditorState {
   activeTab: 'lyrics' | 'style' | 'visuals' | 'fx';
   selectedSlotId: string | null;
   selectedWordIndex: number | null;
+  selectedClipId: string | null;
+  splitFragments: number;
   isTrimModalOpen: boolean;
 }
