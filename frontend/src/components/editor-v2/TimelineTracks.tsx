@@ -128,8 +128,9 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
     const draw = () => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
+      // Drawing buffer matches inner div's actual rendered width (follows zoom)
       const W = (canvas.width = inner.offsetWidth);
-      const H = (canvas.height = canvas.offsetHeight);
+      const H = (canvas.height = 60); // fixed track height
       ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, W, H);
       const bars = state.audioWaveform;
@@ -352,11 +353,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform — canvas sized to match inner widthPct div */}
+          {/* Track 3: Audio waveform — canvas stretched to inner div width */}
           <div className="absolute top-[120px] left-0 h-[60px]" style={{ width: '100%' }}>
             <canvas
               ref={canvasRef}
               className="h-full block"
+              style={{ width: '100%', height: '100%' }}
             />
           </div>
 
