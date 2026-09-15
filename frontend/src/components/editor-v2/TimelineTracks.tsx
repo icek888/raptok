@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { PanelProps } from './EditorView';
 import type { RefObject } from 'react';
+import { WaveformRenderer } from './waveform-renderer';
 
 interface Props extends PanelProps {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -120,34 +121,35 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
     };
   }, [dragState, state.words, state.trimStart, dur, xToTime, actions]);
 
-  // --- Redraw waveform canvas to match the zoomed inner div width ---
+  // --- Waveform: pure JS renderer, no React re-render thrash ---
+  const wfRef = useRef<WaveformRenderer | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const inner = innerRef.current;
     if (!canvas || !inner) return;
-    const draw = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      // Drawing buffer matches inner div's actual rendered width (follows zoom)
-      const W = (canvas.width = inner.offsetWidth);
-      const H = (canvas.height = 60); // fixed track height
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fillRect(0, 0, W, H);
-      const bars = state.audioWaveform;
-      if (!bars.length) return;
-      const barWidth = W / bars.length;
-      ctx.fillStyle = '#444';
-      for (let i = 0; i < bars.length; i++) {
-        const x = i * barWidth;
-        const h = bars[i] * H * 0.8;
-        ctx.fillRect(x, (H - h) / 2, Math.max(1, barWidth - 0.5), h);
-      }
+
+    // Init pure-JS renderer
+    const wf = new WaveformRenderer();
+    wf.init(canvas, inner);
+    wf.setData(state.audioWaveform);
+    wfRef.current = wf;
+
+    return () => {
+      wf.destroy();
+      wfRef.current = null;
     };
-    draw();
-    const ro = new ResizeObserver(draw);
-    ro.observe(inner);
-    return () => ro.disconnect();
-  }, [zoom, state.audioWaveform, widthPct]);
+  }, []); // mount once
+
+  // Update data when waveform changes
+  useEffect(() => {
+    wfRef.current?.setData(state.audioWaveform);
+  }, [state.audioWaveform]);
+
+  // Redraw on zoom change
+  useEffect(() => {
+    wfRef.current?.redraw();
+  }, [zoom, widthPct]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-950">
@@ -353,12 +355,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform — canvas stretched to inner div width */}
+          {/* Track 3: Audio waveform — pure JS renderer manages sizing */}
           <div className="absolute top-[120px] left-0 h-[60px]" style={{ width: '100%' }}>
             <canvas
               ref={canvasRef}
-              className="h-full block"
-              style={{ width: '100%', height: '100%' }}
+              className="block"
+              style={{ width: '100%', height: '60px' }}
             />
           </div>
 
