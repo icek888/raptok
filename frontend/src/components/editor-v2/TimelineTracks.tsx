@@ -88,13 +88,13 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         onClick={handleTimelineClick}
       >
         <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words — compact cards, draggable + double-click to edit */}
-          <div className="absolute top-0 left-0 right-0 h-[40px] border-b border-neutral-800">
+          {/* Track 1: Words — auto-sized cards, draggable + editable */}
+          <div className="absolute top-0 left-0 right-0 h-[36px] border-b border-neutral-800">
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
               const relEnd = w.end - state.trimStart;
-              const left = timeToX(relStart, 100);
-              const width = Math.max(30, ((relEnd - relStart) / dur) * 100 * zoom);
+              const leftPct = timeToX(relStart, 100);
+              const durPct = ((relEnd - relStart) / dur) * 100 * zoom;
               const isActive = state.currentTime >= w.start && state.currentTime < w.end;
               const isEditing = editingWordIdx === i;
               return (
@@ -118,7 +118,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                   }}
                   onClick={e => { e.stopPropagation(); actions.selectWord(i); }}
                   onDoubleClick={e => { e.stopPropagation(); setEditingWordIdx(i); }}
-                  className={`absolute top-1 h-[28px] flex items-center justify-center px-1.5 text-[10px] rounded whitespace-nowrap overflow-hidden select-none ${
+                  className={`absolute top-1 flex items-center justify-center rounded whitespace-nowrap select-none ${
                     isEditing ? 'cursor-text' : 'cursor-grab active:cursor-grabbing'
                   } ${
                     isActive
@@ -127,8 +127,14 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                       ? 'bg-cyan-900 text-cyan-300 border border-cyan-700'
                       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                   }`}
-                  style={{ left: `${left}%`, width: `${width}%`, minWidth: '24px' }}
-                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit)`}
+                  style={{
+                    left: `${leftPct}%`,
+                    height: '22px',
+                    padding: '0 4px',
+                    fontSize: '10px',
+                    minWidth: `${Math.max(durPct, 2)}%`,
+                  }}
+                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit, drag to swap)`}
                 >
                   {isEditing ? (
                     <input
@@ -142,14 +148,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                       }}
                       onBlur={() => setEditingWordIdx(null)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === 'Escape') {
-                          setEditingWordIdx(null);
-                        }
+                        if (e.key === 'Enter' || e.key === 'Escape') setEditingWordIdx(null);
                       }}
                       onClick={e => e.stopPropagation()}
                       onDoubleClick={e => e.stopPropagation()}
-                      className="w-full bg-transparent text-center text-inherit focus:outline-none"
-                      style={{ fontSize: '10px', color: 'inherit' }}
+                      className="bg-transparent text-center focus:outline-none"
+                      style={{ fontSize: '10px', color: 'inherit', width: '60px' }}
                     />
                   ) : (
                     w.word
@@ -160,7 +164,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
           </div>
 
           {/* Track 1.5: Cut markers (beat lines) */}
-          <div className="absolute top-[40px] left-0 right-0 h-[2px]">
+          <div className="absolute top-[36px] left-0 right-0 h-[2px]">
             {state.bpm > 0 && Array.from({ length: slotCount }).map((_, i) => {
               const t = i * beatDuration;
               const left = timeToX(t, 100);
@@ -175,7 +179,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
           </div>
 
           {/* Track 2: Clip slots */}
-          <div className="absolute top-[44px] left-0 right-0 h-[76px] border-b border-neutral-800">
+          <div className="absolute top-[40px] left-0 right-0 h-[76px] border-b border-neutral-800">
             {state.timelineSlots.map((slot, i) => {
               const left = timeToX(slot.start, 100);
               const width = Math.max(20, ((slot.end - slot.start) / dur) * 100 * zoom);

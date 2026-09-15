@@ -102,14 +102,12 @@ export function useEditorState() {
     setState(prev => {
       const unlocked = prev.clips.filter(c => !c.locked);
       if (unlocked.length === 0) return prev;
-      const slots = [...prev.timelineSlots];
-      let clipIdx = 0;
-      for (let i = 0; i < slots.length; i++) {
-        if (!slots[i].clipId) {
-          slots[i] = { ...slots[i], clipId: unlocked[clipIdx % unlocked.length].id };
-          clipIdx++;
-        }
-      }
+      const slots = prev.timelineSlots.map((slot, i) => {
+        // Keep locked clips in place, fill everything else
+        const existingClip = prev.clips.find(c => c.id === slot.clipId);
+        if (existingClip?.locked) return slot;
+        return { ...slot, clipId: unlocked[i % unlocked.length].id };
+      });
       return { ...prev, timelineSlots: slots };
     });
   }, []);

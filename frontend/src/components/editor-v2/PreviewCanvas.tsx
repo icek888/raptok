@@ -88,15 +88,22 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
     }
   }, [state.currentTime, state.trimEnd, state.isPlaying, actions]);
 
-  // When clip changes, set video source
+  // When active clip changes, set video source and reset
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !activeClip?.videoUrl) return;
-    if (video.src !== activeClip.videoUrl) {
+    if (!video) return;
+    if (activeClip?.videoUrl && video.src !== activeClip.videoUrl) {
       video.src = activeClip.videoUrl;
       video.currentTime = 0;
     }
   }, [activeClip?.id, activeClip?.videoUrl]);
+
+  // Reset video to start when slot changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !activeClip?.videoUrl) return;
+    video.currentTime = 0;
+  }, [activeSlot?.id]);
 
   const handleAudioTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
     const t = e.currentTarget.currentTime;

@@ -164,9 +164,16 @@ export default function ClipsPanel({ state, actions }: PanelProps) {
                 alert('No slots! Click "Gen Slots" first to generate timeline from BPM.');
                 return;
               }
+              if (state.clips.length === 0) {
+                alert('No clips! Upload clips or download from YouTube first.');
+                return;
+              }
+              const before = state.timelineSlots.filter(s => s.clipId).length;
               actions.fillSlots();
-              const filled = state.timelineSlots.filter(s => !s.clipId).length;
-              alert(`Filled ${filled} empty slots with ${state.clips.length} clips.`);
+              setTimeout(() => {
+                const total = state.timelineSlots.length;
+                alert(`FILLED: ${total}/${total} slots (was ${before} filled, now all). ${state.clips.length} clips used.`);
+              }, 100);
             }}
             disabled={state.clips.length === 0}
             className="flex-1 py-1.5 text-xs bg-cyan-500 hover:bg-cyan-400 disabled:bg-neutral-800 disabled:text-neutral-600 text-black font-medium rounded"
