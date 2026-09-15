@@ -53,6 +53,7 @@ export interface EditorState {
   // Audio
   audioFile: File | null;
   audioUrl: string | null;
+  audioServerPath: string;  // backend filesystem path for ffmpeg
   audioDuration: number;
   audioWaveform: number[];
   trimStart: number;

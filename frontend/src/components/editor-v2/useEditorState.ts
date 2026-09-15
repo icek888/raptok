@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 const initialState: EditorState = {
   audioFile: null,
   audioUrl: null,
+  audioServerPath: '',
   audioDuration: 0,
   audioWaveform: [],
   trimStart: 0,
@@ -59,6 +60,7 @@ export function useEditorState() {
     update('audioUrl', URL.createObjectURL(file));
     try {
       const result = await api.uploadAudio(file);
+      update('audioServerPath', result.path);
       const info = await api.audioInfo(result.path);
       update('audioDuration', info.duration);
       update('audioWaveform', info.rms_values || []);

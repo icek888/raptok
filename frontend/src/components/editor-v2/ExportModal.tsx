@@ -73,9 +73,10 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
         bold: state.style.fontWeight >= 700,
       };
 
-      const audioPath = state.audioUrl || '';
-      // Blob URLs can't be read by backend — send empty so backend uses video's own audio
-      const cleanAudioPath = audioPath.startsWith('blob:') ? '' : audioPath;
+      const audioPath = state.audioServerPath || '';
+      if (!audioPath) {
+        throw new Error('Audio not uploaded to server. Re-load audio file.');
+      }
 
       const resp = await fetch('/api/render', {
         method: 'POST',
@@ -83,8 +84,8 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
         body: JSON.stringify({
           video_path: videoPath,
           fragments,
-          audio_path: cleanAudioPath,
-          audio_start: cleanAudioPath ? state.trimStart : 0,
+          audio_path: audioPath,
+          audio_start: state.trimStart,
           subtitles,
           style,
           karaoke: false,
