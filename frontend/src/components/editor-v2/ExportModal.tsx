@@ -74,16 +74,17 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
       };
 
       const audioPath = state.audioUrl || '';
-      // If audioUrl is a blob URL, we need the server path
-      // For now, send empty — backend will use video audio if no audio_path
+      // Blob URLs can't be read by backend — send empty so backend uses video's own audio
+      const cleanAudioPath = audioPath.startsWith('blob:') ? '' : audioPath;
+
       const resp = await fetch('/api/render', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           video_path: videoPath,
           fragments,
-          audio_path: audioPath.startsWith('blob:') ? '' : audioPath,
-          audio_start: state.trimStart,
+          audio_path: cleanAudioPath,
+          audio_start: cleanAudioPath ? state.trimStart : 0,
           subtitles,
           style,
           karaoke: false,

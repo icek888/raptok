@@ -435,13 +435,13 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                   style={{ left: `${left}%`, width: `${width}%` }}
                 >
                   {clip ? (
-                    <div className="w-full h-full flex gap-px bg-neutral-900">
+                    <div className="w-full h-full flex gap-px bg-neutral-900 overflow-hidden">
                       {[0, 1, 2].map(ti => {
                         const thumb = slotThumbs[`${slot.id}_${ti}`];
                         return thumb ? (
-                          <img key={ti} src={thumb} className="flex-1 h-full object-cover" alt="" />
+                          <img key={ti} src={thumb} className="h-full object-cover" style={{ aspectRatio: '9/16', width: 'auto' }} alt="" />
                         ) : (
-                          <div key={ti} className="flex-1 h-full bg-neutral-800 flex items-center justify-center">
+                          <div key={ti} className="h-full bg-neutral-800 flex items-center justify-center" style={{ aspectRatio: '9/16', width: 'auto' }}>
                             <span className="text-[8px] text-neutral-600">⋯</span>
                           </div>
                         );
