@@ -87,7 +87,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         onClick={handleTimelineClick}
       >
         <div style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words */}
+          {/* Track 1: Words — compact cards, draggable on timeline */}
           <div className="absolute top-0 left-0 right-0 h-[40px] border-b border-neutral-800">
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
@@ -98,15 +98,33 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
               return (
                 <div
                   key={i}
+                  draggable
+                  onDragStart={e => {
+                    e.dataTransfer.setData('wordIdx', String(i));
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    e.preventDefault();
+                    const fromIdx = parseInt(e.dataTransfer.getData('wordIdx'));
+                    if (isNaN(fromIdx) || fromIdx === i) return;
+                    // Swap word positions
+                    const words = [...state.words];
+                    const tmpStart = words[i].start, tmpEnd = words[i].end;
+                    words[i] = { ...words[i], start: words[fromIdx].start, end: words[fromIdx].end };
+                    words[fromIdx] = { ...words[fromIdx], start: tmpStart, end: tmpEnd };
+                    actions.setWords(words);
+                  }}
                   onClick={e => { e.stopPropagation(); actions.selectWord(i); }}
-                  className={`absolute top-1 h-[32px] flex items-center justify-center px-2 text-[10px] rounded cursor-pointer truncate ${
+                  className={`absolute top-1 h-[28px] flex items-center justify-center px-1.5 text-[10px] rounded cursor-grab active:cursor-grabbing whitespace-nowrap overflow-hidden select-none ${
                     isActive
-                      ? 'bg-cyan-500 text-black font-medium'
+                      ? 'bg-cyan-500 text-black font-semibold'
                       : state.selectedWordIndex === i
-                      ? 'bg-cyan-900 text-cyan-300'
+                      ? 'bg-cyan-900 text-cyan-300 border border-cyan-700'
                       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                   }`}
-                  style={{ left: `${left}%`, width: `${width}%` }}
+                  style={{ left: `${left}%`, width: `${width}%`, minWidth: '24px' }}
+                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s`}
                 >
                   {w.word}
                 </div>
