@@ -428,6 +428,26 @@ export const api = {
     putJSON(`${API_BASE}/admin/users/${username}`, data),
   adminDeleteUser: (username: string) => delJSON(`${API_BASE}/admin/users/${username}`),
   adminUserQuota: (username: string) => getJSON(`${API_BASE}/admin/users/${username}/quota`),
+
+  // ── Editor v2: OpenRouter STT ──
+  transcribeOpenRouter: (
+    audioFile: File,
+    language: string = 'ru',
+    model: string = 'qwen/qwen3-asr-0.6b',
+  ): Promise<{
+    words: { word: string; start: number; end: number }[];
+    text: string;
+    language: string;
+    duration: number;
+    model: string;
+    fallback?: boolean;
+  }> => {
+    const form = new FormData();
+    form.append('file', audioFile);
+    form.append('language', language);
+    form.append('model', model);
+    return postForm(`${API_BASE}/transcribe/openrouter`, form);
+  },
 };
 
 function createThumbnailForm(videoPath: string, timestamps: number[]): FormData {
