@@ -43,20 +43,23 @@ export default function ExportModal({ state, actions: _actions, onClose }: Props
         throw new Error('No slots with clips assigned. Use Gen Slots + FILL first.');
       }
 
-      // Build word_timings — relative to audio_start (trimStart)
-      const wordTimings = state.words.map(w => ({
-        word: w.word,
-        start: Math.max(0, w.start - state.trimStart),
-        end: Math.max(0, w.end - state.trimStart),
-      }));
+      // Build word_timings — relative to trimmed segment start (0 = trimStart)
+      // Words before trimStart are dropped (they're not in the exported segment)
+      const wordTimings = state.words
+        .filter(w => w.end > state.trimStart)
+        .map(w => ({
+          word: w.word,
+          start: Math.max(0, w.start - state.trimStart),
+          end: Math.max(0, w.end - state.trimStart),
+        }));
 
       // Build subtitles from word_timings (group words into lines)
-      const subtitles = state.words.map((w, i) => ({
+      const subtitles = wordTimings.map((w, i) => ({
         id: i,
-        start: Math.max(0, w.start - state.trimStart),
-        end: Math.max(0, w.end - state.trimStart),
+        start: w.start,
+        end: w.end,
         text: w.word,
-        words: [{ word: w.word, start: Math.max(0, w.start - state.trimStart), end: Math.max(0, w.end - state.trimStart) }],
+        words: [{ word: w.word, start: w.start, end: w.end }],
       }));
 
       // Build style — backend SubtitleStyle format

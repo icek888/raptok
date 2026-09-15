@@ -44,12 +44,18 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         const clip = clips.find(c => c.id === slot.clipId);
         if (!clip?.videoUrl) continue;
 
-        // Generate 2-3 thumbnails per slot, synced to slot's time range within clip
         const fragStart = slot.fragmentStart || 0;
         const fragDur = slot.fragmentDuration || (slot.end - slot.start);
         const clipDur = clip.duration || fragDur;
-        // 3 timestamps within the fragment: 15%, 50%, 85%
-        const timestamps = [0.15, 0.5, 0.85].map(p => Math.min(fragStart + p * fragDur, clipDur - 0.1));
+
+        // Thumbnail count proportional to slot duration: 1 frame per ~0.5s, min 2, max 8
+        const thumbCount = Math.max(2, Math.min(8, Math.round(fragDur / 0.5)));
+        // Evenly distributed across the fragment: start, 1/n, 2/n, ..., end
+        const timestamps: number[] = [];
+        for (let i = 0; i < thumbCount; i++) {
+          const p = thumbCount === 1 ? 0.5 : i / (thumbCount - 1);
+          timestamps.push(Math.min(fragStart + p * fragDur, clipDur - 0.1));
+        }
 
         for (let ti = 0; ti < timestamps.length; ti++) {
           if (cancelled) return;
@@ -436,12 +442,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                 >
                   {clip ? (
                     <div className="w-full h-full flex gap-px bg-neutral-900 overflow-hidden">
-                      {[0, 1, 2].map(ti => {
+                      {Array.from({ length: Math.max(2, Math.min(8, Math.round((slot.fragmentDuration || (slot.end - slot.start)) / 0.5))) }).map((_, ti) => {
                         const thumb = slotThumbs[`${slot.id}_${ti}`];
                         return thumb ? (
-                          <img key={ti} src={thumb} className="h-full object-cover" style={{ aspectRatio: '9/16', width: 'auto' }} alt="" />
+                          <img key={ti} src={thumb} className="h-full object-cover flex-1 min-w-0" alt="" />
                         ) : (
-                          <div key={ti} className="h-full bg-neutral-800 flex items-center justify-center" style={{ aspectRatio: '9/16', width: 'auto' }}>
+                          <div key={ti} className="h-full bg-neutral-800 flex items-center justify-center flex-1 min-w-0">
                             <span className="text-[8px] text-neutral-600">⋯</span>
                           </div>
                         );
