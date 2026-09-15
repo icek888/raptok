@@ -1,58 +1,75 @@
 /**
  * WaveformRenderer — plain JS canvas waveform renderer.
  * No React dependency. React just mounts the canvas and calls init/update.
- * Handles its own sizing, zoom, and animation loop.
+ * Observes the INNER div (which changes width on zoom) for resize.
  */
 
 export class WaveformRenderer {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private bars: number[] = [];
-  private container: HTMLElement | null = null;
-  private rafId: number | null = null;
+  private inner: HTMLElement | null = null; // the zoomable inner div (changes width)
   private ro: ResizeObserver | null = null;
   private dpr = 1;
-  private lastWidth = 0;
+  private rafPending = false;
 
-  /** Initialize: attach to canvas element, observe container for resize */
-  init(canvas: HTMLCanvasElement, container: HTMLElement): void {
+  /**
+   * Initialize: attach to canvas element.
+   * @param canvas — the <canvas> to draw on
+   * @param inner — the inner div that changes width on zoom (widthPct)
+   */
+  init(canvas: HTMLCanvasElement, inner: HTMLElement): void {
     this.canvas = canvas;
-    this.container = container;
+    this.inner = inner;
     this.ctx = canvas.getContext('2d');
     this.dpr = window.devicePixelRatio || 1;
 
-    // ResizeObserver on container — redraw when size changes (zoom, window resize)
-    this.ro = new ResizeObserver(() => this.render());
-    this.ro.observe(container);
+    // ResizeObserver on INNER div — fires when widthPct changes (zoom)
+    this.ro = new ResizeObserver(() => {
+      this.scheduleRender();
+    });
+    this.ro.observe(inner);
 
     // Initial render
-    this.render();
+    this.scheduleRender();
   }
 
   /** Update waveform data (bars array 0..1) */
   setData(bars: number[]): void {
     this.bars = bars;
-    this.render();
+    this.scheduleRender();
   }
 
-  /** Force redraw (e.g. after zoom change) — deferred to next frame so DOM has updated */
+  /** Force redraw (e.g. after zoom change) */
   redraw(): void {
-    requestAnimationFrame(() => this.render());
+    this.scheduleRender();
   }
 
-  /** Main render — reads container width, sets canvas buffer, draws bars */
-  private render(): void {
-    if (!this.canvas || !this.ctx || !this.container) return;
+  /** Schedule render on next animation frame (dedup) */
+  private scheduleRender(): void {
+    if (this.rafPending) return;
+    this.rafPending = true;
+    requestAnimationFrame(() => {
+      this.rafPending = false;
+      this.render();
+    });
+  }
 
-    // Get actual rendered width of container (follows zoom via widthPct)
-    const w = this.container.offsetWidth;
+  /** Main render — reads inner div width, sets canvas buffer AND CSS width, draws bars */
+  private render(): void {
+    if (!this.canvas || !this.ctx || !this.inner) return;
+
+    // Width = inner div's actual rendered width (follows zoom via widthPct)
+    const w = this.inner.offsetWidth;
     const h = 60;
 
-    // Skip if width hasn't changed and we have no new data
-    if (w === this.lastWidth && this.bars.length === 0) return;
-    this.lastWidth = w;
+    if (w === 0) return; // not visible yet
 
-    // Set canvas drawing buffer to match container width (× DPR for crispness)
+    // CSS width = inner width (so canvas fills the track exactly)
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+
+    // Set canvas drawing buffer to match (× DPR for crispness)
     this.canvas.width = Math.floor(w * this.dpr);
     this.canvas.height = Math.floor(h * this.dpr);
 
@@ -83,19 +100,16 @@ export class WaveformRenderer {
     this.ctx.restore();
   }
 
-  /** Cleanup — disconnect observers, cancel animation */
+  /** Cleanup — disconnect observers */
   destroy(): void {
     if (this.ro) {
       this.ro.disconnect();
       this.ro = null;
     }
-    if (this.rafId !== null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
     this.canvas = null;
     this.ctx = null;
-    this.container = null;
+    this.inner = null;
     this.bars = [];
+    this.rafPending = false;
   }
 }

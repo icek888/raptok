@@ -24,6 +24,8 @@ export interface TimelineSlot {
   start: number;
   end: number;
   wordIndices: number[];
+  fragmentStart?: number;   // offset within clip (seconds) for SPLIT
+  fragmentDuration?: number; // duration of fragment (seconds)
 }
 
 export interface EditorStyle {

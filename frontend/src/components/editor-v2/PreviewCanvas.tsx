@@ -66,36 +66,47 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
         }
       }
 
+      // For each unique clip, generate 3-4 thumbnails from different timestamps
       for (const [clipId, url] of uniqueClips) {
         if (cancelled) return;
-        try {
-          await new Promise<void>((resolve) => {
-            if (!video) return resolve();
-            video.src = url;
-            video.currentTime = 0.1; // grab frame near start
-            const onSeeked = () => {
-              if (!video || cancelled) return resolve();
-              try {
-                const canvas = document.createElement('canvas');
-                canvas.width = 108;
-                canvas.height = 192; // 9:16 small thumb
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(video, 0, 0, 108, 192);
-                  newThumbs[clipId] = canvas.toDataURL('image/jpeg', 0.7);
+        const clip = clips.find(c => c.id === clipId);
+        const clipDur = clip?.duration || 5;
+        const thumbCount = 4;
+        // Timestamps: 10%, 35%, 60%, 85% of clip duration
+        const timestamps = [0.1, 0.35, 0.6, 0.85].map(p => p * clipDur);
+
+        for (let ti = 0; ti < thumbCount; ti++) {
+          if (cancelled) return;
+          try {
+            await new Promise<void>((resolve) => {
+              if (!video) return resolve();
+              video.src = url;
+              video.currentTime = timestamps[ti];
+              const onSeeked = () => {
+                if (!video || cancelled) return resolve();
+                try {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 108;
+                  canvas.height = 192; // 9:16 small thumb
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.drawImage(video, 0, 0, 108, 192);
+                    // Key: clipId + thumb index
+                    newThumbs[`${clipId}_${ti}`] = canvas.toDataURL('image/jpeg', 0.7);
+                  }
+                } catch (e) {
+                  // CORS or other error — skip
                 }
-              } catch (e) {
-                // CORS or other error — skip
-              }
-              resolve();
-            };
-            const onError = () => resolve(); // skip on error
-            video.addEventListener('seeked', onSeeked, { once: true });
-            video.addEventListener('error', onError, { once: true });
-            setTimeout(() => resolve(), 3000); // timeout fallback
-          });
-        } catch (e) {
-          // skip
+                resolve();
+              };
+              const onError = () => resolve();
+              video.addEventListener('seeked', onSeeked, { once: true });
+              video.addEventListener('error', onError, { once: true });
+              setTimeout(() => resolve(), 3000);
+            });
+          } catch (e) {
+            // skip
+          }
         }
       }
       if (!cancelled) setThumbnails(newThumbs);
@@ -189,13 +200,13 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
       if (clipChanged) {
         video.src = activeClip.videoUrl;
       }
-      // Always reset to beginning on slot change
-      video.currentTime = 0;
-      video.loop = true; // loop within slot if clip is short
+      // Reset to fragment start if SPLIT was used, otherwise to beginning
+      video.currentTime = activeSlot?.fragmentStart ?? 0;
+      video.loop = true; // loop within slot/fragment if clip is short
 
       if (state.isPlaying) video.play().catch(() => {});
     }
-  }, [activeSlot?.id, activeClip?.id, activeClip?.videoUrl, state.isPlaying]);
+  }, [activeSlot?.id, activeSlot?.fragmentStart, activeClip?.id, activeClip?.videoUrl, state.isPlaying]);
 
   const handleAudioTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
     const t = e.currentTarget.currentTime;
@@ -311,7 +322,9 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
               >
                 {state.timelineSlots.slice(0, 4).map((slot, i) => {
                   const clip = slot.clipId ? state.clips.find(c => c.id === slot.clipId) : null;
-                  const thumb = clip ? thumbnails[clip.id] : null;
+                  // Pick a thumb based on fragment index
+                  const fragIdx = slot.fragmentStart ? Math.floor(slot.fragmentStart / ((clip?.duration || 5) / 4)) : 0;
+                  const thumb = clip ? thumbnails[`${clip.id}_${fragIdx % 4}`] || thumbnails[`${clip.id}_0`] : null;
                   return (
                     <div
                       key={slot.id}
@@ -338,7 +351,7 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
                         className="absolute bottom-1 left-1 px-2 py-0.5 rounded text-white"
                         style={{ fontSize: '14px', background: 'rgba(0,0,0,0.6)' }}
                       >
-                        #{i+1} · {slot.end - slot.start}s
+                        #{i+1} · {(slot.end - slot.start).toFixed(1)}s
                       </div>
                     </div>
                   );
@@ -392,7 +405,8 @@ export default function PreviewCanvas({ state, actions, videoRef, audioRef }: Pr
               >
                 {state.timelineSlots.slice(0, 4).map((slot, i) => {
                   const clip = slot.clipId ? state.clips.find(c => c.id === slot.clipId) : null;
-                  const thumb = clip ? thumbnails[clip.id] : null;
+                  const fragIdx = slot.fragmentStart ? Math.floor(slot.fragmentStart / ((clip?.duration || 5) / 4)) : 0;
+                  const thumb = clip ? thumbnails[`${clip.id}_${fragIdx % 4}`] || thumbnails[`${clip.id}_0`] : null;
                   return (
                     <div
                       key={slot.id}

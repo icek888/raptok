@@ -355,12 +355,12 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
             )}
           </div>
 
-          {/* Track 3: Audio waveform — pure JS renderer manages sizing */}
+          {/* Track 3: Audio waveform — pure JS renderer, canvas sized by JS */}
           <div className="absolute top-[120px] left-0 h-[60px]" style={{ width: '100%' }}>
             <canvas
               ref={canvasRef}
               className="block"
-              style={{ width: '100%', height: '60px' }}
+              style={{ height: '60px' }}
             />
           </div>
 

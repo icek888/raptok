@@ -219,7 +219,39 @@ export function useEditorState() {
     setState(prev => {
       if (prev.timelineSlots.length === 0) return prev;
       const f = Math.max(2, Math.min(10, Math.floor(fragments)));
-      const slots = prev.timelineSlots.map(slot => ({ ...slot, clipId }));
+      const clip = prev.clips.find(c => c.id === clipId);
+      if (!clip) return prev;
+
+      // Get clip duration (if known, e.g. from video metadata)
+      // Default to 5s if unknown
+      const clipDur = clip.duration || 5;
+      // Each fragment = clipDur / fragments
+      const fragDur = clipDur / f;
+
+      // Assign fragments to random slots
+      const slotCount = prev.timelineSlots.length;
+      const slots = [...prev.timelineSlots];
+
+      // Shuffle slot indices for random assignment
+      const indices = Array.from({ length: slotCount }, (_, i) => i);
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+      }
+
+      // Assign each slot a random fragment (0..f-1)
+      for (let i = 0; i < slotCount; i++) {
+        const slotIdx = indices[i];
+        const fragIdx = Math.floor(Math.random() * f);
+        slots[slotIdx] = {
+          ...slots[slotIdx],
+          clipId,
+          // Store fragment offset for render: startTime within clip = fragIdx * fragDur
+          fragmentStart: fragIdx * fragDur,
+          fragmentDuration: fragDur,
+        };
+      }
+
       return { ...prev, timelineSlots: slots, selectedClipId: clipId, splitFragments: f };
     });
   }, []);
