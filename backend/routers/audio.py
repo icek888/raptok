@@ -62,7 +62,32 @@ async def api_audio_info(req: BPMRequest):
     """Get audio file info: duration, BPM, suggested fragment range."""
     try:
         import librosa
-        y, sr = librosa.load(req.audio_path, sr=22050, mono=True)
+        import soundfile as sf
+        import numpy as np
+
+        # soundfile handles unicode paths better than audioread
+        try:
+            y, sr = sf.read(req.audio_path, dtype="float32", always_2d=False)
+            if y.ndim > 1:
+                y = y.mean(axis=1)  # mono mix
+            # Resample to 22050 if needed
+            if sr != 22050:
+                y = librosa.resample(y, orig_sr=sr, target_sr=22050)
+                sr = 22050
+        except Exception:
+            # Fallback: ffmpeg to temp wav, then load
+            import tempfile, subprocess
+            tmp_wav = tempfile.mktemp(suffix=".wav")
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", req.audio_path, "-ar", "22050", "-ac", "1", tmp_wav],
+                capture_output=True, timeout=30,
+            )
+            y, sr = sf.read(tmp_wav, dtype="float32")
+            if y.ndim > 1:
+                y = y.mean(axis=1)
+            import os as _os
+            _os.unlink(tmp_wav)
+
         duration = librosa.get_duration(y=y, sr=sr)
 
         bpm_data = detect_bpm(req.audio_path)

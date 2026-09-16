@@ -452,15 +452,17 @@ async def api_transcribe_openrouter(
         else:
             logger.warning(f"[openrouter-stt] No trim range, using FULL track (may cause hallucinations)")
 
-        # Optional vocal isolation — auto-enable if no prompt to reduce hallucinations on silence
-        auto_isolate = not prompt
-        if isolate_vocals or auto_isolate:
+        # Vocal isolation only if explicitly requested by user
+        # (auto-isolation removed — was causing issues with instrumental segments)
+        if isolate_vocals:
             vocal_path = os.path.join(tmp_dir, "vocals.wav")
             from services.openrouter_stt import isolate_vocals_ffmpeg
             success = await isolate_vocals_ffmpeg(stt_path, vocal_path)
             if success:
                 stt_path = vocal_path
-                logger.info(f"[openrouter-stt] Using isolated vocals for transcription ({'auto' if auto_isolate else 'user'})")
+                logger.info(f"[openrouter-stt] Using isolated vocals for transcription (user-requested)")
+            else:
+                logger.warning(f"[openrouter-stt] Vocal isolation failed, using original segment")
 
         result = await transcribe_via_openrouter(stt_path, model=model, language=language, prompt=prompt)
 
