@@ -11,10 +11,21 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_STT_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 
 # Known hallucination patterns from Whisper on silence/music
+# Use word stems — checked against individual words via substring match
 HALLUCINATION_PATTERNS = [
-    "субтитры", "сделал", "dimatorzok", "продолжение следует",
-    "звук", "спасибо за просмотр", "подписывайтесь",
-    "thank you for watching", "please subscribe",
+    "субтитр", "редактор", "корректор", "синецк", "егоров",
+    "сделал", "dimatorzok", "dima", "торзок",
+    "продолжение", "следует", "звук", "спасибо", "просмотр",
+    "подписывай", "лайк", "коммент",
+    "thank you for watching", "please subscribe", "subscribe",
+    "амедиа", "amedia", "перевод", "озвучк",
+]
+
+# Phrases that indicate hallucination (checked against full text)
+HALLUCINATION_PHRASES = [
+    "редактор субтитров", "продолжение следует", "спасибо за просмотр",
+    "подписывайтесь на канал", "thank you for watching",
+    "please subscribe", "субтитры подготовил", "перевод и озвучка",
 ]
 
 
@@ -23,6 +34,10 @@ def _is_hallucination(text: str) -> bool:
     if not text or not text.strip():
         return True
     lower = text.lower().strip()
+    # Check phrases first
+    for phrase in HALLUCINATION_PHRASES:
+        if phrase in lower:
+            return True
     # If all words are from hallucination patterns
     words_in_text = [w for w in lower.split() if w]
     if not words_in_text:
