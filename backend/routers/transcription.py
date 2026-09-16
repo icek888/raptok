@@ -434,18 +434,23 @@ async def api_transcribe_openrouter(
         # Cut segment if trim range provided
         stt_path = tmp_path
         segment_offset = 0.0
-        if trim_end > trim_start > 0:
+        logger.info(f"[openrouter-stt] trim_start={trim_start}, trim_end={trim_end}")
+        if trim_end > trim_start:
             seg_path = os.path.join(tmp_dir, f"segment{suffix}")
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-y", "-ss", str(trim_start), "-t", str(trim_end - trim_start),
                 "-i", tmp_path, "-ar", "16000", "-ac", "1", seg_path,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
+            _, stderr = await proc.communicate()
             if os.path.exists(seg_path) and os.path.getsize(seg_path) > 0:
                 stt_path = seg_path
                 segment_offset = trim_start
-                logger.info(f"[openrouter-stt] Using trimmed segment: {trim_start:.1f}s → {trim_end:.1f}s")
+                logger.info(f"[openrouter-stt] Using trimmed segment: {trim_start:.1f}s → {trim_end:.1f}s ({trim_end - trim_start:.1f}s)")
+            else:
+                logger.warning(f"[openrouter-stt] ffmpeg segment failed: {stderr.decode('utf-8', errors='ignore')[:500]}")
+        else:
+            logger.warning(f"[openrouter-stt] No trim range, using FULL track (may cause hallucinations)")
 
         # Optional vocal isolation — auto-enable if no prompt to reduce hallucinations on silence
         auto_isolate = not prompt

@@ -457,10 +457,9 @@ export const api = {
     form.append('file', audioFile);
     form.append('language', language);
     form.append('model', model);
-    if (trimEnd > trimStart) {
-      form.append('trim_start', String(trimStart));
-      form.append('trim_end', String(trimEnd));
-    }
+    // Always send trim range — backend uses it to cut the segment for STT
+    form.append('trim_start', String(trimStart));
+    form.append('trim_end', String(trimEnd));
     if (prompt) form.append('prompt', prompt);
     if (isolateVocals) form.append('isolate_vocals', 'true');
     return postForm(`${API_BASE}/transcribe/openrouter`, form);
