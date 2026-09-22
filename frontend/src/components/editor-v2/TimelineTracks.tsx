@@ -156,8 +156,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
   ) => {
     e.stopPropagation();
     e.preventDefault();
-    const container = containerRef.current;
-    if (!container) return;
+    const inner = innerRef.current;
+    if (!inner) return;
     const w = state.words[wordIdx];
     if (!w) return;
     setDragState({
@@ -166,7 +166,8 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
       startX: e.clientX,
       origStart: w.start,
       origEnd: w.end,
-      containerWidth: container.getBoundingClientRect().width,
+      // Use inner div width (accounts for zoom) so pixel→time scaling is correct
+      containerWidth: inner.getBoundingClientRect().width,
     });
   };
 
