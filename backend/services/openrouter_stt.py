@@ -76,29 +76,24 @@ _MODEL_MAP = {
 DEFAULT_MODEL = "openai/whisper-large-v3-turbo"
 
 
-async def transcribe_via_openrouter(
-    audio_path: str,
-    model: str = DEFAULT_MODEL,
-    language: str = "ru",
-    prompt: str = "",
-) -> dict:
-    """
-    Transcribe audio file via OpenRouter STT API using multipart file upload.
-    Returns: { words: [{word, start, end}], text, language, duration, model }
-    """
-    if not OPENROUTER_API_KEY:
-        raise ValueError("OPENROUTER_API_KEY not set")
+# Models that use JSON base64 format instead of multipart
+# Based on OpenRouter docs: all STT models support JSON base64
+# Some models REQUIRE it (nemotron, grok-stt, assemblyai)
+_JSON_BASE64_REQUIRED = {
+    "nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b",
+    "x-ai/grok-stt-1.0",
+    "assemblyai/universal-3-5-pro",
+}
 
-    # Auto-upgrade deprecated models
-    model = _MODEL_MAP.get(model, model)
 
+async def _transcribe_multipart(audio_path: str, model: str, language: str, prompt: str) -> dict:
+    """Multipart form upload — fallback for models that don't support JSON base64."""
     ext = os.path.splitext(audio_path)[1].lower() or ".mp3"
     filename = f"audio{ext}"
+    mime = "audio/wav" if ext == ".wav" else "audio/mpeg"
 
     with open(audio_path, "rb") as f:
-        files = {
-            "file": (filename, f, "audio/mpeg"),
-        }
+        files = {"file": (filename, f, mime)}
         data = {
             "model": model,
             "language": language,
@@ -106,7 +101,6 @@ async def transcribe_via_openrouter(
             "timestamp_granularities[]": "word",
             "temperature": "0.3",
         }
-        # Whisper-1 supports optional prompt for context
         if prompt:
             data["prompt"] = prompt
 
@@ -118,7 +112,80 @@ async def transcribe_via_openrouter(
                 data=data,
             )
             response.raise_for_status()
-            resp_data = response.json()
+            return response.json()
+
+
+async def _transcribe_json_base64(audio_path: str, model: str, language: str, prompt: str) -> dict:
+    """JSON base64 body — primary format for all OpenRouter STT models."""
+    import base64 as _b64
+
+    ext = os.path.splitext(audio_path)[1].lower().lstrip(".") or "mp3"
+    fmt = "wav" if ext == "wav" else "mp3"
+
+    with open(audio_path, "rb") as f:
+        audio_b64 = _b64.b64encode(f.read()).decode("utf-8")
+
+    body: dict = {
+        "model": model,
+        "input_audio": {
+            "data": audio_b64,
+            "format": fmt,
+        },
+        "response_format": "verbose_json",
+        "timestamp_granularities": ["word"],
+        "temperature": 0.3,
+    }
+    # Omit language to let model auto-detect, or pin it
+    if language and language != "auto":
+        body["language"] = language
+    if prompt:
+        body["prompt"] = prompt
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            OPENROUTER_STT_URL,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def transcribe_via_openrouter(
+    audio_path: str,
+    model: str = DEFAULT_MODEL,
+    language: str = "ru",
+    prompt: str = "",
+) -> dict:
+    """
+    Transcribe audio file via OpenRouter STT API.
+    Uses JSON base64 format for all models (per OpenRouter docs).
+    Falls back to multipart if JSON fails.
+    Returns: { words: [{word, start, end}], text, language, duration, model }
+    """
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY not set")
+
+    # Auto-upgrade deprecated models
+    model = _MODEL_MAP.get(model, model)
+
+    # JSON base64 is primary format; multipart is fallback
+    use_json = True  # All models try JSON first
+    logger.info(f"[openrouter-stt] model={model}, format=json_base64")
+
+    try:
+        resp_data = await _transcribe_json_base64(audio_path, model, language, prompt)
+    except Exception as e:
+        if model in _JSON_BASE64_REQUIRED:
+            # These models ONLY support JSON — don't try multipart
+            logger.error(f"[openrouter-stt] JSON base64 failed for {model}: {e}")
+            raise
+        # Fallback to multipart for whisper/mai/qwen
+        logger.warning(f"[openrouter-stt] JSON base64 failed: {e}, trying multipart...")
+        resp_data = await _transcribe_multipart(audio_path, model, language, prompt)
 
     # Parse word-level timestamps
     words = []
