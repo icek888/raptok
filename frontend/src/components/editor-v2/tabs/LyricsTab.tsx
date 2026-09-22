@@ -56,7 +56,7 @@ export default function LyricsTab({ state, actions }: TabProps) {
           </select>
           <button
             onClick={() => actions.transcribe()}
-            disabled={state.isTranscribing || !state.audioFile}
+            disabled={state.isTranscribing || (!state.audioFile && !state.audioServerPath)}
             className="px-3 py-1 text-xs bg-cyan-500 hover:bg-cyan-400 disabled:bg-neutral-800 disabled:text-neutral-600 text-black font-medium rounded"
           >
             {state.isTranscribing ? '⏳ Transcribing...' : '🎙 Transcribe'}

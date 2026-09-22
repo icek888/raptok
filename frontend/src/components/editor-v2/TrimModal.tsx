@@ -168,25 +168,22 @@ export default function TrimModal({ state, actions }: PanelProps) {
     if (!state.audioServerPath) {
       // Fallback for file-only (no server path) — old behavior
       actions.closeTrimModal();
-      actions.transcribe();
       return;
     }
     setConfirming(true);
     try {
-      // Cut segment on server — store trimmed file, use it for STT + export
+      // Cut segment on server — store trimmed file for later STT + export
       const result = await api.cutSegment(
         state.audioServerPath,
         state.trimStart,
         state.trimmedDuration,
       );
-      // Update state with trimmed segment path
       actions.setTrimmedSegmentPath(result.segment_path);
       actions.closeTrimModal();
-      actions.transcribe();
+      // No auto-transcribe — user picks model and clicks Transcribe manually
     } catch (e) {
-      console.error('cutSegment failed, falling back to full file:', e);
+      console.error('cutSegment failed:', e);
       actions.closeTrimModal();
-      actions.transcribe();
     } finally {
       setConfirming(false);
     }
