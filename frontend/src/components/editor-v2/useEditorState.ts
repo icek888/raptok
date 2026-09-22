@@ -189,28 +189,29 @@ export function useEditorState() {
   }, [update]);
 
   const transcribe = useCallback(async () => {
-    if (!state.audioFile) return;
+    if (!state.audioFile && !state.audioServerPath) return;
     update('isTranscribing', true);
     try {
       const result = await api.transcribeOpenRouter(
-        state.audioFile,
+        state.audioFile instanceof File ? state.audioFile : null,
         state.language,
         state.transcriptModel,
         state.trimStart,
         state.trimEnd,
         state.transcriptPrompt,
         state.isolateVocals,
+        state.audioServerPath,
       );
       update('words', result.words);
     } catch (e) {
       console.warn('OpenRouter STT failed, falling back to CrisperWhisper:', e);
-      // Try CrisperWhisper fallback
       try {
         const fallback = await api.transcribeCrisper(
-          state.audioFile,
+          state.audioFile instanceof File ? state.audioFile : null,
           state.language,
           state.trimStart,
           state.trimEnd,
+          state.audioServerPath,
         );
         update('words', fallback.words);
         console.log('CrisperWhisper fallback succeeded:', fallback.words.length, 'words');
@@ -221,7 +222,7 @@ export function useEditorState() {
     } finally {
       update('isTranscribing', false);
     }
-  }, [state.audioFile, state.language, state.transcriptModel, state.trimStart, state.trimEnd, update]);
+  }, [state.audioFile, state.audioServerPath, state.language, state.transcriptModel, state.trimStart, state.trimEnd, update]);
 
   const setWords = useCallback((words: WordTiming[]) => update('words', words), [update]);
   const addClip = useCallback((clip: Clip) => setState(prev => ({ ...prev, clips: [...prev.clips, clip] })), []);

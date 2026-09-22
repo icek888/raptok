@@ -438,13 +438,14 @@ export const api = {
 
   // ── Editor v2: OpenRouter STT ──
   transcribeOpenRouter: (
-    audioFile: File,
+    audioFile: File | null,
     language: string = 'ru',
     model: string = 'openai/whisper-large-v3-turbo',
     trimStart: number = 0,
     trimEnd: number = 0,
     prompt: string = '',
     isolateVocals: boolean = false,
+    audioServerPath: string = '',
   ): Promise<{
     words: { word: string; start: number; end: number }[];
     text: string;
@@ -454,10 +455,15 @@ export const api = {
     fallback?: boolean;
   }> => {
     const form = new FormData();
-    form.append('file', audioFile);
+    if (audioFile instanceof File) {
+      form.append('file', audioFile);
+    } else if (audioServerPath) {
+      form.append('audio_path', audioServerPath);
+    } else {
+      throw new Error('No audio file or server path provided');
+    }
     form.append('language', language);
     form.append('model', model);
-    // Always send trim range — backend uses it to cut the segment for STT
     form.append('trim_start', String(trimStart));
     form.append('trim_end', String(trimEnd));
     if (prompt) form.append('prompt', prompt);
@@ -467,17 +473,24 @@ export const api = {
 
   // ── Editor v2: CrisperWhisper fallback ──
   transcribeCrisper: (
-    audioFile: File,
+    audioFile: File | null,
     language: string = 'ru',
     trimStart: number = 0,
     trimEnd: number = 0,
+    audioServerPath: string = '',
   ): Promise<{
     words: { word: string; start: number; end: number }[];
     text: string;
     model: string;
   }> => {
     const form = new FormData();
-    form.append('file', audioFile);
+    if (audioFile instanceof File) {
+      form.append('file', audioFile);
+    } else if (audioServerPath) {
+      form.append('audio_path', audioServerPath);
+    } else {
+      throw new Error('No audio file or server path provided');
+    }
     form.append('language', language);
     form.append('engine', 'crisper');
     form.append('trim_start', String(trimStart));

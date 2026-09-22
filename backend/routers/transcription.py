@@ -413,7 +413,8 @@ async def _run_pretranscribe(audio_path: str, language: str, model_size: str):
 
 @router.post("/api/transcribe/openrouter")
 async def api_transcribe_openrouter(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
+    audio_path: str = Form(""),
     language: str = Form("ru"),
     model: str = Form("openai/whisper-large-v3-turbo"),
     trim_start: float = Form(0.0),
@@ -422,13 +423,26 @@ async def api_transcribe_openrouter(
     isolate_vocals: bool = Form(False),
 ):
     """Transcribe audio via OpenRouter STT with optional vocal isolation and prompt.
+    Accepts either an uploaded file OR a server-side audio_path (e.g. from YouTube download).
     If trim_start/trim_end provided, only transcribes that segment."""
-    # Save uploaded file temporarily
-    suffix = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
+    import shutil as _shutil
     tmp_dir = tempfile.mkdtemp()
+    suffix = ".mp3"
     tmp_path = os.path.join(tmp_dir, f"stt_input{suffix}")
-    with open(tmp_path, "wb") as f:
-        f.write(await file.read())
+
+    if file is not None and file.filename:
+        # Upload-based: save uploaded file
+        suffix = os.path.splitext(file.filename or "audio.mp3")[1] or ".mp3"
+        tmp_path = os.path.join(tmp_dir, f"stt_input{suffix}")
+        with open(tmp_path, "wb") as f:
+            f.write(await file.read())
+    elif audio_path:
+        # Server-side path (e.g. YouTube download): copy/symlink the file
+        if not os.path.isfile(audio_path):
+            raise HTTPException(status_code=404, detail=f"Audio file not found: {audio_path}")
+        _shutil.copy2(audio_path, tmp_path)
+    else:
+        raise HTTPException(status_code=422, detail="Either 'file' or 'audio_path' is required")
 
     try:
         # Cut segment if trim range provided
