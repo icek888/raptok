@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { PanelProps } from './EditorView';
+import { api } from '../../api/client';
 
 const DURATION_PRESETS = [15, 20, 25, 30];
 
@@ -161,9 +162,34 @@ export default function TrimModal({ state, actions }: PanelProps) {
     }
   };
 
-  const handleConfirm = () => {
-    actions.closeTrimModal();
-    actions.transcribe();
+  const [confirming, setConfirming] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!state.audioServerPath) {
+      // Fallback for file-only (no server path) — old behavior
+      actions.closeTrimModal();
+      actions.transcribe();
+      return;
+    }
+    setConfirming(true);
+    try {
+      // Cut segment on server — store trimmed file, use it for STT + export
+      const result = await api.cutSegment(
+        state.audioServerPath,
+        state.trimStart,
+        state.trimmedDuration,
+      );
+      // Update state with trimmed segment path
+      actions.setTrimmedSegmentPath(result.segment_path);
+      actions.closeTrimModal();
+      actions.transcribe();
+    } catch (e) {
+      console.error('cutSegment failed, falling back to full file:', e);
+      actions.closeTrimModal();
+      actions.transcribe();
+    } finally {
+      setConfirming(false);
+    }
   };
 
   const fmtTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
@@ -277,9 +303,10 @@ export default function TrimModal({ state, actions }: PanelProps) {
             {/* Confirm button */}
             <button
               onClick={handleConfirm}
-              className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded-lg transition-colors"
+              disabled={confirming}
+              className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 disabled:bg-cyan-800 disabled:text-neutral-400 text-black font-bold rounded-lg transition-colors"
             >
-              CONFIRM SELECTION
+              {confirming ? '⏳ Cutting segment...' : 'CONFIRM SELECTION'}
             </button>
 
             {/* Hidden audio element */}

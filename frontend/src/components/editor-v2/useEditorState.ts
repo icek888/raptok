@@ -45,6 +45,7 @@ const initialState: EditorState = {
   splitFragments: 4,
   isTrimModalOpen: false,
   isDownloadingAudio: false,
+  trimmedSegmentPath: '',
 };
 
 export function useEditorState() {
@@ -188,30 +189,39 @@ export function useEditorState() {
     update('trimmedDuration', end - start);
   }, [update]);
 
+  const setTrimmedSegmentPath = useCallback((path: string) => update('trimmedSegmentPath', path), [update]);
+
   const transcribe = useCallback(async () => {
-    if (!state.audioFile && !state.audioServerPath) return;
+    // Use pre-cut segment if available, otherwise use full audio with trim range
+    const sttPath = state.trimmedSegmentPath || state.audioServerPath;
+    if (!state.audioFile && !sttPath) return;
     update('isTranscribing', true);
     try {
+      // If we have a pre-cut segment, trim_start=0 (segment is already cut)
+      const useTrimStart = state.trimmedSegmentPath ? 0 : state.trimStart;
+      const useTrimEnd = state.trimmedSegmentPath ? 0 : state.trimEnd;
       const result = await api.transcribeOpenRouter(
         state.audioFile instanceof File ? state.audioFile : null,
         state.language,
         state.transcriptModel,
-        state.trimStart,
-        state.trimEnd,
+        useTrimStart,
+        useTrimEnd,
         state.transcriptPrompt,
         state.isolateVocals,
-        state.audioServerPath,
+        sttPath,
       );
       update('words', result.words);
     } catch (e) {
       console.warn('OpenRouter STT failed, falling back to CrisperWhisper:', e);
       try {
+        const useTrimStart = state.trimmedSegmentPath ? 0 : state.trimStart;
+        const useTrimEnd = state.trimmedSegmentPath ? 0 : state.trimEnd;
         const fallback = await api.transcribeCrisper(
           state.audioFile instanceof File ? state.audioFile : null,
           state.language,
-          state.trimStart,
-          state.trimEnd,
-          state.audioServerPath,
+          useTrimStart,
+          useTrimEnd,
+          sttPath,
         );
         update('words', fallback.words);
         console.log('CrisperWhisper fallback succeeded:', fallback.words.length, 'words');
@@ -222,7 +232,7 @@ export function useEditorState() {
     } finally {
       update('isTranscribing', false);
     }
-  }, [state.audioFile, state.audioServerPath, state.language, state.transcriptModel, state.trimStart, state.trimEnd, update]);
+  }, [state.audioFile, state.audioServerPath, state.trimmedSegmentPath, state.language, state.transcriptModel, state.trimStart, state.trimEnd, update]);
 
   const setWords = useCallback((words: WordTiming[]) => update('words', words), [update]);
   const addClip = useCallback((clip: Clip) => setState(prev => ({ ...prev, clips: [...prev.clips, clip] })), []);
@@ -400,7 +410,7 @@ export function useEditorState() {
     videoRef,
     audioRef,
     actions: {
-      loadAudio, loadAudioFromYouTube, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
+      loadAudio, loadAudioFromYouTube, trimAudio, setTrimmedSegmentPath, transcribe, setWords, addClip, removeClip, lockClip,
       fillSlots, shuffleSlots, splitClipToSlots, selectSlot, selectWord, selectClip,
       setSplitFragments, assignClip, setStyle, setEffects, setVisuals,
       play, pause, seek, setTab, openTrimModal, closeTrimModal, uploadClip, generateSlots,

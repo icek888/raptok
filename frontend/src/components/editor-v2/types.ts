@@ -96,4 +96,5 @@ export interface EditorState {
   splitFragments: number;
   isTrimModalOpen: boolean;
   isDownloadingAudio: boolean;
+  trimmedSegmentPath: string;  // server path to pre-cut segment (from cut-segment API)
 }
