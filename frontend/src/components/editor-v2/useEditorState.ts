@@ -77,34 +77,52 @@ export function useEditorState() {
   const loadAudioFromYouTube = useCallback(async (url: string) => {
     update('isTranscribing', true); // reuse as "loading" indicator
     try {
-      const result = await api.audioFromYouTube(url);
-      // result: { path, title, duration } — path is server-side file
+      // Use AbortController with 180s timeout — yt-dlp can take a while
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 180000);
+      
+      const form = new FormData();
+      form.append('url', url);
+      const res = await fetch('/api/audio-from-youtube', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+      }
+      
+      const result = await res.json();
       const serverPath = result.path || result.local_path || result.filepath;
       const title = result.title || result.filename || 'YouTube Audio';
       const filename = serverPath.split('/').pop();
       update('audioServerPath', serverPath);
-      update('audioFile', { name: title } as File); // fake File for UI display
+      update('audioFile', { name: title } as File);
       update('audioUrl', `/api/audio-preview/${filename}`);
 
-      // Get audio info (duration, waveform, BPM)
-      try {
-        const info = await api.audioInfo(serverPath);
-        update('audioDuration', info.duration);
-        update('audioWaveform', info.rms_values || []);
-        update('bpm', info.bpm);
-        update('trimStart', info.suggested_start);
-        update('trimEnd', info.suggested_end);
-        update('trimmedDuration', info.suggested_end - info.suggested_start);
-      } catch (e) {
-        console.error('audioInfo error:', e);
-        // Fallback: set default 30s trim
+      // Use duration from yt-dlp if available, otherwise default 30s trim
+      const duration = result.duration || 0;
+      if (duration > 0) {
+        update('audioDuration', duration);
+        update('trimStart', 0);
+        update('trimEnd', Math.min(30, duration));
+        update('trimmedDuration', Math.min(30, duration));
+      } else {
         update('trimStart', 0);
         update('trimEnd', 30);
         update('trimmedDuration', 30);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('loadAudioFromYouTube error:', e);
-      alert(`YouTube download failed: ${e}`);
+      if (e.name === 'AbortError') {
+        alert('YouTube download timed out (180s). Try a shorter video.');
+      } else {
+        alert(`YouTube download failed: ${e.message || e}`);
+      }
     } finally {
       update('isTranscribing', false);
     }

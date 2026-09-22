@@ -123,8 +123,13 @@ async def audio_from_youtube(url: str = Form(...)):
         raise HTTPException(status_code=500, detail="Audio file not created")
 
     try:
-        import librosa
-        duration = librosa.get_duration(path=str(audio_path))
+        import subprocess as sp
+        dur_result = sp.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(audio_path)],
+            capture_output=True, text=True, timeout=5
+        )
+        duration = float(dur_result.stdout.strip()) if dur_result.returncode == 0 and dur_result.stdout.strip() else 0
     except Exception:
         duration = 0
 
