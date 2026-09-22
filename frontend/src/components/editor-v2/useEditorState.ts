@@ -73,6 +73,43 @@ export function useEditorState() {
     }
   }, [update]);
 
+  // Load audio from YouTube URL — downloads via yt-dlp on backend
+  const loadAudioFromYouTube = useCallback(async (url: string) => {
+    update('isTranscribing', true); // reuse as "loading" indicator
+    try {
+      const result = await api.audioFromYouTube(url);
+      // result: { path, title, duration } — path is server-side file
+      const serverPath = result.path || result.local_path || result.filepath;
+      const title = result.title || result.filename || 'YouTube Audio';
+      const filename = serverPath.split('/').pop();
+      update('audioServerPath', serverPath);
+      update('audioFile', { name: title } as File); // fake File for UI display
+      update('audioUrl', `/api/audio-preview/${filename}`);
+
+      // Get audio info (duration, waveform, BPM)
+      try {
+        const info = await api.audioInfo(serverPath);
+        update('audioDuration', info.duration);
+        update('audioWaveform', info.rms_values || []);
+        update('bpm', info.bpm);
+        update('trimStart', info.suggested_start);
+        update('trimEnd', info.suggested_end);
+        update('trimmedDuration', info.suggested_end - info.suggested_start);
+      } catch (e) {
+        console.error('audioInfo error:', e);
+        // Fallback: set default 30s trim
+        update('trimStart', 0);
+        update('trimEnd', 30);
+        update('trimmedDuration', 30);
+      }
+    } catch (e) {
+      console.error('loadAudioFromYouTube error:', e);
+      alert(`YouTube download failed: ${e}`);
+    } finally {
+      update('isTranscribing', false);
+    }
+  }, [update]);
+
   const trimAudio = useCallback((start: number, end: number) => {
     update('trimStart', start);
     update('trimEnd', end);
@@ -290,7 +327,7 @@ export function useEditorState() {
     videoRef,
     audioRef,
     actions: {
-      loadAudio, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
+      loadAudio, loadAudioFromYouTube, trimAudio, transcribe, setWords, addClip, removeClip, lockClip,
       fillSlots, shuffleSlots, splitClipToSlots, selectSlot, selectWord, selectClip,
       setSplitFragments, assignClip, setStyle, setEffects, setVisuals,
       play, pause, seek, setTab, openTrimModal, closeTrimModal, uploadClip, generateSlots,

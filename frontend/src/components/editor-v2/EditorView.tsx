@@ -6,6 +6,7 @@ import EditorTabs from './EditorTabs';
 import TimelineTracks from './TimelineTracks';
 import TrimModal from './TrimModal';
 import ExportModal from './ExportModal';
+import YouTubeInput from './YouTubeInput';
 import type { EditorState } from './types';
 import type { EditorActions } from './useEditorState';
 
@@ -68,12 +69,20 @@ export default function EditorView() {
               <p className="text-sm text-neutral-500 max-w-xs">
                 Load audio to start. Trim a 15-30s segment, transcribe lyrics, add video clips.
               </p>
-              <button
-                onClick={() => actions.openTrimModal()}
-                className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded-lg transition-colors"
-              >
-                📁 Load Audio
-              </button>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={() => actions.openTrimModal()}
+                  className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-medium rounded-lg transition-colors"
+                >
+                  📁 Upload Audio
+                </button>
+                <div className="flex items-center gap-2 w-80">
+                  <div className="flex-1 h-px bg-neutral-700" />
+                  <span className="text-[10px] text-neutral-600">or from YouTube</span>
+                  <div className="flex-1 h-px bg-neutral-700" />
+                </div>
+                <YouTubeInput onLoad={actions.loadAudioFromYouTube} loading={state.isTranscribing} />
+              </div>
             </div>
           )}
         </div>
