@@ -81,7 +81,7 @@ export default function EditorView() {
                   <span className="text-[10px] text-neutral-600">or from YouTube</span>
                   <div className="flex-1 h-px bg-neutral-700" />
                 </div>
-                <YouTubeInput onLoad={actions.loadAudioFromYouTube} loading={state.isTranscribing} />
+                <YouTubeInput onLoad={actions.loadAudioFromYouTube} loading={state.isDownloadingAudio} />
               </div>
             </div>
           )}

@@ -95,4 +95,5 @@ export interface EditorState {
   selectedClipId: string | null;
   splitFragments: number;
   isTrimModalOpen: boolean;
+  isDownloadingAudio: boolean;
 }

@@ -44,6 +44,7 @@ const initialState: EditorState = {
   selectedClipId: null,
   splitFragments: 4,
   isTrimModalOpen: false,
+  isDownloadingAudio: false,
 };
 
 export function useEditorState() {
@@ -75,7 +76,7 @@ export function useEditorState() {
 
   // Load audio from YouTube URL — downloads via yt-dlp on backend
   const loadAudioFromYouTube = useCallback(async (url: string) => {
-    update('isTranscribing', true); // reuse as "loading" indicator
+    update('isDownloadingAudio', true);
     try {
       // Use AbortController with 180s timeout — yt-dlp can take a while
       const controller = new AbortController();
@@ -120,26 +121,55 @@ export function useEditorState() {
       // Open TrimModal so user can pick segment
       update('isTrimModalOpen', true);
 
-      // Fetch waveform + BPM in background (non-blocking) — TrimModal will re-render when it arrives
-      (async () => {
-        try {
-          const infoForm = new FormData();
-          infoForm.append('audio_path', serverPath);
-          const infoRes = await fetch('/api/audio-info', {
-            method: 'POST',
-            body: infoForm,
-            credentials: 'include',
-          });
-          if (infoRes.ok) {
-            const info = await infoRes.json();
-            update('audioWaveform', info.rms_values || []);
-            update('bpm', info.bpm || 0);
-            // Don't override trim — user may have already adjusted it
+      // Generate waveform on client via Web Audio API — decode PCM data directly
+      try {
+        const audioRes = await fetch(`/api/audio-preview/${filename}`);
+        const arrayBuffer = await audioRes.arrayBuffer();
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        audioCtx.close();
+        
+        // Compute RMS samples from PCM data
+        const channelData = audioBuffer.getChannelData(0);
+        const numSamples = 200;
+        const samplesPerBucket = Math.floor(channelData.length / numSamples);
+        const samples: number[] = [];
+        for (let i = 0; i < numSamples; i++) {
+          let sum = 0;
+          const start = i * samplesPerBucket;
+          for (let j = 0; j < samplesPerBucket; j++) {
+            sum += channelData[start + j] ** 2;
           }
-        } catch (e) {
-          console.error('Background audio-info (non-fatal):', e);
+          samples.push(Math.sqrt(sum / samplesPerBucket));
         }
-      })();
+        // Normalize to 0-1
+        const maxSample = Math.max(...samples, 0.001);
+        const normalized = samples.map(s => Math.min(1, s / maxSample));
+        
+        update('audioWaveform', normalized);
+        update('audioDuration', audioBuffer.duration);
+      } catch (e) {
+        console.error('Client waveform generation failed (non-fatal):', e);
+        // Fallback: try backend audio-info for waveform only
+        (async () => {
+          try {
+            const infoForm = new FormData();
+            infoForm.append('audio_path', serverPath);
+            const infoRes = await fetch('/api/audio-info', {
+              method: 'POST',
+              body: infoForm,
+              credentials: 'include',
+            });
+            if (infoRes.ok) {
+              const info = await infoRes.json();
+              update('audioWaveform', info.rms_values || []);
+              update('bpm', info.bpm || 0);
+            }
+          } catch (e2) {
+            console.error('Backend audio-info also failed:', e2);
+          }
+        })();
+      }
     } catch (e: any) {
       console.error('loadAudioFromYouTube error:', e);
       if (e.name === 'AbortError') {
@@ -148,7 +178,7 @@ export function useEditorState() {
         alert(`YouTube download failed: ${e.message || e}`);
       }
     } finally {
-      update('isTranscribing', false);
+      update('isDownloadingAudio', false);
     }
   }, [update]);
 
