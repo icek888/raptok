@@ -480,11 +480,7 @@ async def api_transcribe_openrouter(
 
         result = await transcribe_via_openrouter(stt_path, model=model, language=language, prompt=prompt)
 
-        # Shift word timestamps back to absolute (relative to full track)
-        if segment_offset > 0:
-            for w in result.get("words", []):
-                w["start"] = round(w.get("start", 0) + segment_offset, 3)
-                w["end"] = round(w.get("end", 0) + segment_offset, 3)
+        # Words are 0-based from the segment file — frontend handles offset
 
         return result
     except Exception as e:

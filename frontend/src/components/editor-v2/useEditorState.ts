@@ -197,8 +197,9 @@ export function useEditorState() {
     if (!state.audioFile && !sttPath) return;
     update('isTranscribing', true);
     try {
-      // If we have a pre-cut segment, trim_start=0 (segment is already cut)
-      const useTrimStart = state.trimmedSegmentPath ? 0 : state.trimStart;
+      // If we have a pre-cut segment, send trim_start for offset but trim_end=0
+      // so backend doesn't re-cut (segment is already cut) but can offset timestamps
+      const useTrimStart = state.trimmedSegmentPath ? state.trimStart : state.trimStart;
       const useTrimEnd = state.trimmedSegmentPath ? 0 : state.trimEnd;
       const result = await api.transcribeOpenRouter(
         state.audioFile instanceof File ? state.audioFile : null,
@@ -210,11 +211,16 @@ export function useEditorState() {
         state.isolateVocals,
         sttPath,
       );
-      update('words', result.words);
+      // Words are 0-based from segment — offset by trimStart for timeline
+      const offset = state.trimmedSegmentPath ? state.trimStart : 0;
+      const words = offset > 0
+        ? result.words.map(w => ({ ...w, start: w.start + offset, end: w.end + offset }))
+        : result.words;
+      update('words', words);
     } catch (e) {
       console.warn('OpenRouter STT failed, falling back to CrisperWhisper:', e);
       try {
-        const useTrimStart = state.trimmedSegmentPath ? 0 : state.trimStart;
+        const useTrimStart = state.trimmedSegmentPath ? state.trimStart : state.trimStart;
         const useTrimEnd = state.trimmedSegmentPath ? 0 : state.trimEnd;
         const fallback = await api.transcribeCrisper(
           state.audioFile instanceof File ? state.audioFile : null,
@@ -223,7 +229,12 @@ export function useEditorState() {
           useTrimEnd,
           sttPath,
         );
-        update('words', fallback.words);
+        // Words are 0-based from segment — offset by trimStart for timeline
+        const offset = state.trimmedSegmentPath ? state.trimStart : 0;
+        const words = offset > 0
+          ? fallback.words.map(w => ({ ...w, start: w.start + offset, end: w.end + offset }))
+          : fallback.words;
+        update('words', words);
         console.log('CrisperWhisper fallback succeeded:', fallback.words.length, 'words');
       } catch (e2) {
         console.error('Both STT engines failed:', e2);
