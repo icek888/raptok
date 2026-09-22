@@ -65,9 +65,20 @@ def _filter_words(words: list) -> list:
     return filtered
 
 
+# Model compatibility: whisper-1 is not available on OpenRouter,
+# auto-upgrade to whisper-large-v3-turbo
+_MODEL_MAP = {
+    "openai/whisper-1": "openai/whisper-large-v3-turbo",
+    "whisper-1": "openai/whisper-large-v3-turbo",
+}
+
+# Default model — whisper-large-v3-turbo (fast, accurate, word-level timestamps)
+DEFAULT_MODEL = "openai/whisper-large-v3-turbo"
+
+
 async def transcribe_via_openrouter(
     audio_path: str,
-    model: str = "openai/whisper-1",
+    model: str = DEFAULT_MODEL,
     language: str = "ru",
     prompt: str = "",
 ) -> dict:
@@ -77,6 +88,9 @@ async def transcribe_via_openrouter(
     """
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY not set")
+
+    # Auto-upgrade deprecated models
+    model = _MODEL_MAP.get(model, model)
 
     ext = os.path.splitext(audio_path)[1].lower() or ".mp3"
     filename = f"audio{ext}"

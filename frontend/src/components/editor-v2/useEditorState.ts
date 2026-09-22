@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { EditorState, WordTiming, Clip, TimelineSlot, EditorStyle, EditorEffects } from './types';
 import { api } from '../../api/client';
 
@@ -13,7 +13,7 @@ const initialState: EditorState = {
   trimmedDuration: 30,
   words: [],
   language: 'ru',
-  transcriptModel: 'openai/whisper-1',
+  transcriptModel: 'openai/whisper-large-v3-turbo',
   transcriptPrompt: '',        // optional context prompt for Whisper
   isolateVocals: false,          // isolate vocals before transcription
   isTranscribing: false,
@@ -95,7 +95,20 @@ export function useEditorState() {
       update('words', result.words);
     } catch (e) {
       console.warn('OpenRouter STT failed, falling back to CrisperWhisper:', e);
-      // TODO: implement CrisperWhisper fallback
+      // Try CrisperWhisper fallback
+      try {
+        const fallback = await api.transcribeCrisper(
+          state.audioFile,
+          state.language,
+          state.trimStart,
+          state.trimEnd,
+        );
+        update('words', fallback.words);
+        console.log('CrisperWhisper fallback succeeded:', fallback.words.length, 'words');
+      } catch (e2) {
+        console.error('Both STT engines failed:', e2);
+        alert('Transcription failed. Try a different segment or use Manual input.');
+      }
     } finally {
       update('isTranscribing', false);
     }
@@ -260,6 +273,17 @@ export function useEditorState() {
 
   const setTranscriptPrompt = useCallback((prompt: string) => setState(prev => ({ ...prev, transcriptPrompt: prompt })), []);
   const setIsolateVocals = useCallback((v: boolean) => setState(prev => ({ ...prev, isolateVocals: v })), []);
+  const setTranscriptModel = useCallback((m: string) => setState(prev => ({ ...prev, transcriptModel: m })), []);
+
+  // Listen for model selection from LyricsTab dropdown
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail === 'string') setTranscriptModel(detail);
+    };
+    window.addEventListener('set-transcript-model', handler);
+    return () => window.removeEventListener('set-transcript-model', handler);
+  }, [setTranscriptModel]);
 
   return {
     state,

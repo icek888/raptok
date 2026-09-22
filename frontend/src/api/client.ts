@@ -440,7 +440,7 @@ export const api = {
   transcribeOpenRouter: (
     audioFile: File,
     language: string = 'ru',
-    model: string = 'openai/whisper-1',
+    model: string = 'openai/whisper-large-v3-turbo',
     trimStart: number = 0,
     trimEnd: number = 0,
     prompt: string = '',
@@ -463,6 +463,26 @@ export const api = {
     if (prompt) form.append('prompt', prompt);
     if (isolateVocals) form.append('isolate_vocals', 'true');
     return postForm(`${API_BASE}/transcribe/openrouter`, form);
+  },
+
+  // ── Editor v2: CrisperWhisper fallback ──
+  transcribeCrisper: (
+    audioFile: File,
+    language: string = 'ru',
+    trimStart: number = 0,
+    trimEnd: number = 0,
+  ): Promise<{
+    words: { word: string; start: number; end: number }[];
+    text: string;
+    model: string;
+  }> => {
+    const form = new FormData();
+    form.append('file', audioFile);
+    form.append('language', language);
+    form.append('engine', 'crisper');
+    form.append('trim_start', String(trimStart));
+    form.append('trim_end', String(trimEnd));
+    return postForm(`${API_BASE}/transcribe`, form);
   },
 };
 

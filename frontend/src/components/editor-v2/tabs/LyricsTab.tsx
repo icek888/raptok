@@ -99,7 +99,26 @@ export default function LyricsTab({ state, actions }: TabProps) {
             </label>
           </div>
         )}
-        <p className="text-[10px] text-neutral-600">Model: {state.transcriptModel}</p>
+        <div className="flex items-center gap-1">
+          <select
+            value={state.transcriptModel}
+            onChange={(e) => {
+              // update transcriptModel via state — need to use actions
+              // Since there's no dedicated action, we use a workaround:
+              // store in localStorage and reload, or add action
+              const newModel = e.target.value;
+              // Dispatch custom event for useEditorState to pick up
+              window.dispatchEvent(new CustomEvent('set-transcript-model', { detail: newModel }));
+            }}
+            className="text-[10px] bg-neutral-800 text-neutral-400 rounded px-1 py-1 border border-neutral-700"
+            title="STT model"
+          >
+            <option value="openai/whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+            <option value="microsoft/mai-transcribe-2">mai-transcribe-2</option>
+            <option value="qwen/qwen3-asr-1.7b">qwen3-asr-1.7b</option>
+          </select>
+          <span className="text-[10px] text-neutral-600">Model: {state.transcriptModel}</span>
+        </div>
       </div>
 
       {/* Manual lyrics input */}

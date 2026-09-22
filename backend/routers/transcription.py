@@ -415,7 +415,7 @@ async def _run_pretranscribe(audio_path: str, language: str, model_size: str):
 async def api_transcribe_openrouter(
     file: UploadFile = File(...),
     language: str = Form("ru"),
-    model: str = Form("openai/whisper-1"),
+    model: str = Form("openai/whisper-large-v3-turbo"),
     trim_start: float = Form(0.0),
     trim_end: float = Form(0.0),
     prompt: str = Form(""),
