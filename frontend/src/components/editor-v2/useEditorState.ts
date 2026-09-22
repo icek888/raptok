@@ -104,7 +104,7 @@ export function useEditorState() {
       update('audioFile', { name: title } as File);
       update('audioUrl', `/api/audio-preview/${filename}`);
 
-      // Use duration from yt-dlp if available, otherwise default 30s trim
+      // Set duration from yt-dlp response
       const duration = result.duration || 0;
       if (duration > 0) {
         update('audioDuration', duration);
@@ -116,6 +116,30 @@ export function useEditorState() {
         update('trimEnd', 30);
         update('trimmedDuration', 30);
       }
+
+      // Open TrimModal so user can pick segment
+      update('isTrimModalOpen', true);
+
+      // Fetch waveform + BPM in background (non-blocking) — TrimModal will re-render when it arrives
+      (async () => {
+        try {
+          const infoForm = new FormData();
+          infoForm.append('audio_path', serverPath);
+          const infoRes = await fetch('/api/audio-info', {
+            method: 'POST',
+            body: infoForm,
+            credentials: 'include',
+          });
+          if (infoRes.ok) {
+            const info = await infoRes.json();
+            update('audioWaveform', info.rms_values || []);
+            update('bpm', info.bpm || 0);
+            // Don't override trim — user may have already adjusted it
+          }
+        } catch (e) {
+          console.error('Background audio-info (non-fatal):', e);
+        }
+      })();
     } catch (e: any) {
       console.error('loadAudioFromYouTube error:', e);
       if (e.name === 'AbortError') {
