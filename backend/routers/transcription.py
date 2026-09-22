@@ -15,9 +15,34 @@ from services.forced_alignment import align_lyrics_to_timings
 from services.bpm_detector import detect_bpm
 from services.stem_separator import separate_vocals, separate_vocals_with_stems
 from services.openrouter_stt import transcribe_via_openrouter
+import httpx
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _crisper_fallback(audio_path: str, language: str, error_msg: str) -> dict:
+    """Run CrisperWhisper fallback in thread pool to avoid blocking event loop."""
+    import concurrent.futures
+    from services.crisper_transcriber import transcribe_audio_crisper
+
+    loop = asyncio.get_event_loop()
+    # Run CPU-bound CrisperWhisper in thread pool — doesn't block other requests
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        fallback_result = await loop.run_in_executor(
+            pool, transcribe_audio_crisper, audio_path, language
+        )
+    if isinstance(fallback_result, dict):
+        return {**fallback_result, "fallback": True, "error": error_msg}
+    return {
+        "words": fallback_result.get("words", []) if isinstance(fallback_result, dict) else [],
+        "text": fallback_result.get("text", "") if isinstance(fallback_result, dict) else str(fallback_result),
+        "language": language,
+        "duration": 0,
+        "model": "crisper-whisper-fallback",
+        "fallback": True,
+        "error": error_msg,
+    }
 
 TEMP_DIR = os.environ.get("TEMP_DIR", "/tmp/raptok")
 
@@ -483,30 +508,19 @@ async def api_transcribe_openrouter(
         # Words are 0-based from the segment file — frontend handles offset
 
         return result
-    except Exception as e:
-        logger.warning(f"[openrouter-stt] Failed: {e}, trying fallback...")
-        # Fallback to local CrisperWhisper
-        try:
-            from services.crisper_transcriber import transcribe_audio_crisper
-            fallback_result = transcribe_audio_crisper(tmp_path, language=language)
-            if isinstance(fallback_result, dict):
-                return {**fallback_result, "fallback": True, "error": str(e)}
-            # If it returns a different format, normalize
-            return {
-                "words": fallback_result.get("words", []) if isinstance(fallback_result, dict) else [],
-                "text": fallback_result.get("text", "") if isinstance(fallback_result, dict) else str(fallback_result),
-                "language": language,
-                "duration": 0,
-                "model": "crisper-whisper-fallback",
-                "fallback": True,
-                "error": str(e),
-            }
-        except Exception as fallback_err:
-            logger.error(f"[openrouter-stt] Fallback also failed: {fallback_err}")
+    except httpx.HTTPStatusError as e:
+        status_code = e.response.status_code if e.response else 0
+        if status_code == 429:
+            # Rate limit — don't fallback to Crisper (it blocks event loop for minutes)
+            logger.warning(f"[openrouter-stt] Rate limited (429) — not falling back to Crisper")
             raise HTTPException(
-                status_code=500,
-                detail=f"OpenRouter failed: {e}. Fallback also failed: {fallback_err}"
+                status_code=429,
+                detail="OpenRouter rate limit reached. Wait a minute and try again."
             )
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        # Other HTTP errors — fallback to Crisper in thread pool (non-blocking)
+        logger.warning(f"[openrouter-stt] HTTP {status_code} failed: {e}, trying fallback in thread pool...")
+        return await _crisper_fallback(tmp_path, language, str(e))
+    except Exception as e:
+        # Non-HTTP errors — fallback to Crisper in thread pool (non-blocking)
+        logger.warning(f"[openrouter-stt] Failed: {e}, trying fallback in thread pool...")
+        return await _crisper_fallback(tmp_path, language, str(e))
