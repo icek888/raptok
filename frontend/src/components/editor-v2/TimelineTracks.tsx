@@ -12,6 +12,7 @@ type DragMode = 'move' | 'resize-left' | 'resize-right' | null;
 export default function TimelineTracks({ state, actions, videoRef, audioRef }: Props) {
   const [zoom, setZoom] = useState(1);
   const [editingWordIdx, setEditingWordIdx] = useState<number | null>(null);
+  const [dragOverWordIdx, setDragOverWordIdx] = useState<number | null>(null);
   const [slotCountInput, setSlotCountInput] = useState(0); // 0 = use BPM
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -311,7 +312,7 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
         onClick={handleTimelineClick}
       >
         <div ref={innerRef} style={{ width: widthPct, minWidth: '100%' }} className="h-full relative">
-          {/* Track 1: Words */}
+          {/* Track 1: Words — real duration, visible resize handles, drag move/swap */}
           <div className="absolute top-0 left-0 h-[36px] border-b border-neutral-800" style={{ width: '100%' }}>
             {state.words.map((w, i) => {
               const relStart = w.start - state.trimStart;
@@ -320,6 +321,10 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
               const durPct = ((relEnd - relStart) / dur) * 100;
               const isActive = state.currentTime >= w.start && state.currentTime < w.end;
               const isEditing = editingWordIdx === i;
+              const isDragging = dragState?.wordIdx === i;
+              const isDragOver = dragOverWordIdx === i;
+              // Real duration width — min 0.8% so tiny words are still visible
+              const widthPct = Math.max(durPct, 0.8);
               return (
                 <div
                   key={i}
@@ -328,11 +333,14 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     e.dataTransfer.setData('wordIdx', String(i));
                     e.dataTransfer.effectAllowed = 'move';
                   }}
-                  onDragOver={e => e.preventDefault()}
+                  onDragOver={e => { e.preventDefault(); setDragOverWordIdx(i); }}
+                  onDragLeave={() => setDragOverWordIdx(null)}
                   onDrop={e => {
                     e.preventDefault();
+                    setDragOverWordIdx(null);
                     const fromIdx = parseInt(e.dataTransfer.getData('wordIdx'));
                     if (isNaN(fromIdx) || fromIdx === i) return;
+                    // Swap timestamps between two words
                     const words = [...state.words];
                     const tmpStart = words[i].start, tmpEnd = words[i].end;
                     words[i] = { ...words[i], start: words[fromIdx].start, end: words[fromIdx].end };
@@ -340,34 +348,41 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                     actions.setWords(words);
                   }}
                   onMouseDown={e => {
-                    // Middle drag (move) — only if not editing and not on a resize handle
                     if (!isEditing) startWordDrag(e, i, 'move');
                   }}
                   onClick={e => { e.stopPropagation(); actions.selectWord(i); }}
                   onDoubleClick={e => { e.stopPropagation(); setEditingWordIdx(i); }}
-                  className={`absolute top-1 flex items-center justify-center rounded whitespace-nowrap select-none ${
-                    isEditing ? 'cursor-text' : 'cursor-grab active:cursor-grabbing'
+                  className={`absolute top-1 flex items-center justify-center rounded whitespace-nowrap select-none transition-colors ${
+                    isEditing ? 'cursor-text' : isDragging ? 'cursor-grabbing' : 'cursor-grab'
                   } ${
                     isActive
-                      ? 'bg-cyan-500 text-black font-semibold'
+                      ? 'bg-cyan-500 text-black font-semibold shadow-lg shadow-cyan-500/30'
+                      : isDragOver
+                      ? 'bg-fuchsia-600 text-white border-2 border-fuchsia-400 scale-105 z-20'
                       : state.selectedWordIndex === i
-                      ? 'bg-cyan-900 text-cyan-300 border border-cyan-700'
+                      ? 'bg-cyan-900 text-cyan-300 border border-cyan-600'
                       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
                   }`}
                   style={{
                     left: `${leftPct}%`,
+                    width: `${widthPct}%`,
                     height: '22px',
-                    padding: '0 4px',
+                    padding: '0 2px',
                     fontSize: '10px',
-                    minWidth: `${Math.max(durPct, 2)}%`,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
-                  title={`${w.word} · ${(w.start - state.trimStart).toFixed(1)}s (dbl-click to edit, drag edges to resize, drag middle to move)`}
+                  title={`${w.word} · ${(relStart).toFixed(2)}s–${(relEnd).toFixed(2)}s (${(relEnd-relStart).toFixed(2)}s)\nDrag center: move · Drag edges: resize · Drag onto another word: swap · Dbl-click: edit`}
                 >
-                  {/* Left resize handle (Issue 2) */}
+                  {/* Left resize handle — visible on hover, always grabbable */}
                   <div
                     onMouseDown={e => startWordDrag(e, i, 'resize-left')}
-                    className="absolute left-0 top-0 bottom-0 w-[4px] cursor-ew-resize bg-cyan-400/0 hover:bg-cyan-400/50 rounded-l"
-                  />
+                    className="absolute left-0 top-0 bottom-0 w-[6px] cursor-ew-resize rounded-l transition-colors group-hover:bg-cyan-400/60"
+                    style={{ background: isDragging && dragState?.mode === 'resize-left' ? 'rgba(34,211,238,0.8)' : 'transparent' }}
+                  >
+                    <div className="absolute left-1 top-1/2 -translate-y-1/2 w-[2px] h-[10px] bg-neutral-600 opacity-0 hover:opacity-100 transition-opacity" />
+                  </div>
+                  {/* Word text — centered, clipped to real duration */}
                   {isEditing ? (
                     <input
                       autoFocus
@@ -385,17 +400,20 @@ export default function TimelineTracks({ state, actions, videoRef, audioRef }: P
                       onClick={e => e.stopPropagation()}
                       onDoubleClick={e => e.stopPropagation()}
                       onMouseDown={e => e.stopPropagation()}
-                      className="bg-transparent text-center focus:outline-none"
-                      style={{ fontSize: '10px', color: 'inherit', width: '60px' }}
+                      className="bg-transparent text-center focus:outline-none w-full"
+                      style={{ fontSize: '10px', color: 'inherit' }}
                     />
                   ) : (
-                    w.word
+                    <span className="px-1 truncate w-full text-center">{w.word}</span>
                   )}
-                  {/* Right resize handle (Issue 2) */}
+                  {/* Right resize handle — visible on hover, always grabbable */}
                   <div
                     onMouseDown={e => startWordDrag(e, i, 'resize-right')}
-                    className="absolute right-0 top-0 bottom-0 w-[4px] cursor-ew-resize bg-cyan-400/0 hover:bg-cyan-400/50 rounded-r"
-                  />
+                    className="absolute right-0 top-0 bottom-0 w-[6px] cursor-ew-resize rounded-r transition-colors"
+                    style={{ background: isDragging && dragState?.mode === 'resize-right' ? 'rgba(34,211,238,0.8)' : 'transparent' }}
+                  >
+                    <div className="absolute right-1 top-1/2 -translate-y-1/2 w-[2px] h-[10px] bg-neutral-600 opacity-0 hover:opacity-100 transition-opacity" />
+                  </div>
                 </div>
               );
             })}
