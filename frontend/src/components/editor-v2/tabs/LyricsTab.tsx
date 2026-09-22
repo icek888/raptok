@@ -116,6 +116,9 @@ export default function LyricsTab({ state, actions }: TabProps) {
             <option value="openai/whisper-large-v3-turbo">whisper-large-v3-turbo</option>
             <option value="microsoft/mai-transcribe-2">mai-transcribe-2</option>
             <option value="qwen/qwen3-asr-1.7b">qwen3-asr-1.7b</option>
+            <option value="assemblyai/universal-3-5-pro">assemblyai-universal-3.5-pro</option>
+            <option value="nvidia/nemotron-3.5-asr-streaming-multilingual-0.6b">nemotron-3.5-asr</option>
+            <option value="x-ai/grok-stt-1.0">grok-stt-1.0</option>
           </select>
           <span className="text-[10px] text-neutral-600">Model: {state.transcriptModel}</span>
         </div>
